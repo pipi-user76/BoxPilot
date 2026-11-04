@@ -23,7 +23,7 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 - AIO Sandbox 1.11.0
 - 项目虚拟环境 `.venv`
 
-经实测，AIO Sandbox 容器内运行用户为 `gem`，可写工作区为 `/home/gem`。BoxPilot 使用 `/home/gem/boxpilot/<task_id>` 作为任务目录，不使用不存在的 `/workspace`。
+经实测，AIO Sandbox 容器内运行用户为 `gem`，可写工作区为 `/home/gem`。BoxPilot 使用 `/home/gem/boxpilot/<task_id>` 作为任务目录。
 
 ## 启动沙箱
 
@@ -39,18 +39,20 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 
 ```powershell
 uv sync
-uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 访问：
 
+- 任务工作台：<http://127.0.0.1:8000/ui/task_list.html>
+- 创建任务页面：<http://127.0.0.1:8000/ui/create_task.html>
 - API 文档：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/health>
 
 如果当前终端无法启动项目虚拟环境，可直接使用：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 ## 验证沙箱
@@ -59,7 +61,7 @@ uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 .\.venv\Scripts\python.exe scripts\test_sandbox.py
 ```
 
-脚本验证任务目录、文件写入、文件读取、Shell、浏览器导航、页面文本和截图。截图保存在 `data/artifacts/smoke/smoke.png`。任何一项失败时进程返回非零退出码。
+脚本验证任务目录、文件写入、文件读取、Shell、浏览器导航、页面文本和截图。截图保存在 `artifacts/smoke/smoke.png`。任何一项失败时进程返回非零退出码。
 
 ## 运行测试
 
@@ -96,18 +98,28 @@ $env:BOXPILOT_RUN_SANDBOX_TESTS='1'
 
 完整字段与团队对接约定见 [docs/interface_contract.md](docs/interface_contract.md)。
 
+人工操作步骤见 [docs/manual_testing.md](docs/manual_testing.md)。
+
 ## 目录说明
 
 ```text
-app/
-  adapters/          AIO Sandbox 统一适配层
-  api/endpoints/     公共任务 API
-  core/              配置、路径与 URL 校验
-  executor/          状态机和固定步骤调度
-  schemas/           Pydantic 数据契约
-  services/          临时任务存储与本地产物存储
+backend/
+  main.py            FastAPI 应用和公共路由装配
+  db.py              SQLite 连接、TaskStore 与临时内存实现
+  scheduler.py       状态机和固定步骤调度
+  sandbox_client.py  Shell/File/Browser 统一调用
+  routes_tasks.py    任务查询与下载接口
+  routes_csv.py      CSV 上传接口占位
+  models.py          Pydantic 数据契约
+  storage.py         本地任务产物存储
+  templates/         四个任务模板
+frontend/
+  create_task.*      创建任务页面
+  task_list.*        任务列表和状态页面
+samples/             测试输入与样例
+artifacts/           程序运行产物，不提交真实数据
 scripts/
-  init_db.py         陈咏忻负责的三表初始化入口
+  init_db.py         三表初始化入口
   test_sandbox.py    真实沙箱冒烟测试
 tests/               单元测试和可选沙箱集成测试
 docs/                接口契约与验收记录

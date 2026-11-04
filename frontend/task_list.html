@@ -1,0 +1,84 @@
+<!-- 文件职责：任务工作台页面，由 task_list.js 轮询任务并展示步骤和下载入口。 -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BoxPilot 任务工作台</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div>
+        <p class="product-mark">BOXPILOT</p>
+        <h1>任务工作台</h1>
+      </div>
+      <div class="header-actions">
+        <span id="health" class="health-badge" data-state="loading">检查环境</span>
+        <a class="button secondary" href="create_task.html">创建任务</a>
+        <button id="refresh" class="button" type="button">刷新</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- 概览区只显示聚合数字，详细状态在任务列表中查看。 -->
+    <section class="summary-band" aria-label="任务概览">
+      <div class="metric">
+        <span class="metric-label">全部任务</span>
+        <strong id="task-count">0</strong>
+      </div>
+      <div class="metric">
+        <span class="metric-label">运行中</span>
+        <strong id="running-count">0</strong>
+      </div>
+      <div class="metric">
+        <span class="metric-label">成功</span>
+        <strong id="success-count">0</strong>
+      </div>
+      <div class="metric">
+        <span class="metric-label">失败</span>
+        <strong id="failed-count">0</strong>
+      </div>
+    </section>
+
+    <section class="task-layout">
+      <div class="task-panel">
+        <div class="section-heading">
+          <div>
+            <h2>任务列表</h2>
+            <p id="last-updated">等待加载</p>
+          </div>
+          <label class="inline-control">
+            <span>状态</span>
+            <select id="status-filter">
+              <option value="">全部</option>
+              <option value="PENDING">等待中</option>
+              <option value="RUNNING">运行中</option>
+              <option value="SUCCESS">成功</option>
+              <option value="FAILED">失败</option>
+              <option value="TIMEOUT">超时</option>
+            </select>
+          </label>
+        </div>
+        <div id="task-list" class="task-list" aria-live="polite"></div>
+        <div id="empty-state" class="empty-state" hidden>
+          <strong>暂无任务</strong>
+          <span>创建任务后将在这里显示状态和产物。</span>
+        </div>
+      </div>
+
+      <!-- 详情区由 JavaScript 动态填充，避免页面刷新打断轮询。 -->
+      <aside id="detail-panel" class="detail-panel" aria-label="任务详情">
+        <div class="detail-placeholder">
+          <strong>选择一个任务</strong>
+          <span>查看执行步骤、错误信息和可下载产物。</span>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="task_list.js"></script>
+</body>
+</html>

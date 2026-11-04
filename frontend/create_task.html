@@ -1,0 +1,56 @@
+<!-- 文件职责：创建任务页面壳，字段显隐和提交逻辑位于 create_task.js。 -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>创建任务 | BoxPilot</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div>
+        <p class="product-mark">BOXPILOT</p>
+        <h1>创建任务</h1>
+      </div>
+      <a class="button secondary" href="task_list.html">返回任务列表</a>
+    </div>
+  </header>
+  <main class="form-workspace">
+    <!-- 所有任务共用同一表单，切换任务类型时由脚本显示对应字段。 -->
+    <form id="create-form" class="task-form" novalidate>
+      <label>
+        <span>任务类型</span>
+        <select id="task-type" name="task_type">
+          <option value="WEB_DIGEST">网页资料整理</option>
+          <option value="CSV_ANALYSIS">CSV 数据分析</option>
+          <option value="REPO_CHECK">代码仓库体检</option>
+          <option value="WEB_ACCEPTANCE">网页应用验收</option>
+        </select>
+      </label>
+      <label data-field="url">
+        <span>网页地址</span>
+        <input id="url" name="url" type="url" placeholder="https://example.com">
+      </label>
+      <label data-field="repo_url" hidden>
+        <span>仓库地址</span>
+        <input id="repo_url" name="repo_url" type="url" placeholder="https://github.com/owner/repo">
+      </label>
+      <label data-field="expected_title" hidden>
+        <span>预期标题</span>
+        <input id="expected_title" name="expected_title" type="text">
+      </label>
+      <label data-field="file" hidden>
+        <span>CSV 文件</span>
+        <input id="file" name="file" type="file" accept=".csv,text/csv">
+      </label>
+      <div class="form-actions">
+        <button class="button" type="submit">提交任务</button>
+        <span id="form-message" class="form-message" aria-live="polite"></span>
+      </div>
+    </form>
+  </main>
+  <script src="create_task.js"></script>
+</body>
+</html>

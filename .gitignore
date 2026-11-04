@@ -9,6 +9,7 @@ htmlcov/
 .idea/
 .vscode/
 data/boxpilot.db
-data/artifacts/*
-!data/artifacts/.gitkeep
+data/artifacts/
+artifacts/*
+!artifacts/.gitkeep
 *.log

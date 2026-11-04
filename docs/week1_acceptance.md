@@ -20,7 +20,7 @@
 | 文件读取 | 通过 | 读回 `BoxPilot smoke test` |
 | 浏览器导航 | 通过 | 打开 `http://127.0.0.1:8080`，标题为 `AIO Sandbox`，HTTP 200 |
 | 页面文本 | 通过 | 成功提取页面可见文本 |
-| 页面截图 | 通过 | 生成 `data/artifacts/smoke/smoke.png`，169311 bytes |
+| 页面截图 | 通过 | 生成 `artifacts/smoke/smoke.png`，截图非空 |
 
 ## 后端端到端验证
 

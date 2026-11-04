@@ -14,7 +14,7 @@ PENDING -> RUNNING -> SUCCESS / FAILED
 
 ## 2. 数据库契约
 
-陈咏忻提供 SQLite 数据访问实现，替换 `app/services/task_store.py` 中的 `InMemoryTaskStore`。必须保持现有 `TaskStore` 方法可调用。
+陈咏忻提供 SQLite 数据访问实现，替换 `backend/db.py` 中的 `InMemoryTaskStore`。必须保持现有 `TaskStore` 方法可调用。
 
 ### tasks
 
@@ -120,7 +120,7 @@ get_artifact(artifact_id) -> tuple[Artifact, task_id] | None
 
 ## 5. SandboxAdapter 契约
 
-所有沙箱调用必须经过 `app/adapters/sandbox.py`，模板中不得直接 import `agent_sandbox`。
+所有沙箱调用必须经过 `backend/sandbox_client.py`，模板中不得直接 import `agent_sandbox`。
 
 ```python
 health() -> dict
@@ -151,7 +151,7 @@ take_screenshot(save_path, full_page=False) -> dict
 
 ## 6. 模板契约
 
-模板实现 `app/executor/templates/base.py` 的 `TaskTemplate`：
+模板实现 `backend/templates/base.py` 的 `TaskTemplate`：
 
 ```python
 class TaskTemplate(Protocol):
@@ -172,8 +172,8 @@ TaskType.WEB_ACCEPTANCE: WebAcceptanceTemplate(...)
 
 ## 7. 存储与目录
 
-- 本地产物根目录：`data/artifacts`，可通过 `ARTIFACT_ROOT` 修改。
-- 每个任务目录：`data/artifacts/<task_id>`。
+- 本地产物根目录：`artifacts`，可通过 `ARTIFACT_ROOT` 修改。
+- 每个任务目录：`artifacts/<task_id>`。
 - 沙箱任务目录：`/home/gem/boxpilot/<task_id>`。
 - 沙箱内运行用户为 `gem`，没有 `/workspace` 写权限。
 - 数据库只保存相对路径，不保存宿主或沙箱绝对路径。

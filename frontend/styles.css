@@ -1,0 +1,488 @@
+/* 文件职责：定义任务工作台、创建任务页和通用状态组件的响应式样式。 */
+
+:root {
+  color-scheme: light;
+  --ink: #1f2933;
+  --muted: #667085;
+  --line: #d9dee5;
+  --surface: #ffffff;
+  --canvas: #f5f6f7;
+  --accent: #0f766e;
+  --accent-dark: #115e59;
+  --success: #16794c;
+  --warning: #9a6700;
+  --danger: #b42318;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 14px;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.app-header {
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.header-inner {
+  max-width: 1380px;
+  margin: 0 auto;
+  padding: 20px 28px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.product-mark {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+h2 {
+  margin-bottom: 3px;
+  font-size: 16px;
+}
+
+.header-actions,
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--accent-dark);
+}
+
+.button.secondary {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.button.secondary:hover {
+  border-color: var(--accent);
+}
+
+.button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.health-badge,
+.status-badge {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.health-badge[data-state="ok"] {
+  border-color: #b7dfc9;
+  background: #edf8f2;
+  color: var(--success);
+}
+
+.health-badge[data-state="degraded"],
+.health-badge[data-state="loading"] {
+  border-color: #efd6a7;
+  background: #fff8e8;
+  color: var(--warning);
+}
+
+.workspace {
+  max-width: 1380px;
+  margin: 0 auto;
+  padding: 22px 28px 40px;
+}
+
+.summary-band {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin-bottom: 16px;
+}
+
+.metric {
+  padding: 16px 18px;
+  border-right: 1px solid var(--line);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.metric:last-child {
+  border-right: 0;
+}
+
+.metric-label {
+  color: var(--muted);
+}
+
+.metric strong {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.task-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.task-panel,
+.detail-panel,
+.task-form {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.task-panel {
+  min-height: 420px;
+}
+
+.section-heading {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.section-heading p {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inline-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+select,
+input {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  padding: 7px 10px;
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid rgba(15, 118, 110, 0.18);
+  border-color: var(--accent);
+}
+
+.task-list {
+  display: grid;
+}
+
+.task-row {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  color: inherit;
+  padding: 14px 18px;
+  text-align: left;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 16px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.task-row:last-child {
+  border-bottom: 0;
+}
+
+.task-row:hover,
+.task-row[aria-current="true"] {
+  background: #f1f7f6;
+}
+
+.task-name {
+  min-width: 0;
+}
+
+.task-name strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-badge[data-status="SUCCESS"] {
+  border-color: #b7dfc9;
+  background: #edf8f2;
+  color: var(--success);
+}
+
+.status-badge[data-status="FAILED"],
+.status-badge[data-status="TIMEOUT"] {
+  border-color: #f2c4bf;
+  background: #fff1f0;
+  color: var(--danger);
+}
+
+.status-badge[data-status="RUNNING"],
+.status-badge[data-status="PENDING"] {
+  border-color: #efd6a7;
+  background: #fff8e8;
+  color: var(--warning);
+}
+
+.task-time {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.detail-panel {
+  min-height: 420px;
+  position: sticky;
+  top: 16px;
+}
+
+.detail-placeholder,
+.empty-state {
+  min-height: 260px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.detail-placeholder strong,
+.empty-state strong {
+  color: var(--ink);
+}
+
+.detail-content {
+  padding: 18px;
+}
+
+.detail-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-heading h2 {
+  word-break: break-word;
+}
+
+.detail-meta {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.detail-section {
+  margin-top: 18px;
+}
+
+.detail-section h3 {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.step-list,
+.artifact-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.step-item,
+.artifact-item {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.step-item small,
+.artifact-item small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.error-text {
+  color: var(--danger);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.form-workspace {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.task-form {
+  padding: 22px;
+  display: grid;
+  gap: 16px;
+}
+
+.task-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.task-form label > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.form-message {
+  color: var(--muted);
+}
+
+/* 中等屏幕把详情栏移到列表下方，保证任务列表仍有足够宽度。 */
+@media (max-width: 900px) {
+  .task-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-panel {
+    position: static;
+  }
+
+  .summary-band {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric:nth-child(2) {
+    border-right: 0;
+  }
+
+  .metric:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+/* 手机宽度下改为单列布局，并让任务时间和详情字段自然换行。 */
+@media (max-width: 620px) {
+  .header-inner,
+  .workspace,
+  .form-workspace {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .header-inner,
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .task-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .task-time {
+    grid-column: 1 / -1;
+  }
+
+  .summary-band {
+    grid-template-columns: 1fr;
+  }
+
+  .metric {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .metric:last-child {
+    border-bottom: 0;
+  }
+
+  .detail-meta {
+    grid-template-columns: 1fr;
+  }
+}
