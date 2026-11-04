@@ -1,0 +1,14 @@
+[project]
+name = "boxpilot"
+version = "0.1.0"
+description = "AIO Sandbox task execution workbench"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "agent-sandbox>=0.0.30",
+    "fastapi>=0.162.0",
+    "pydantic-settings>=2.16.2",
+    "requests>=2.34.2",
+    "sqlalchemy>=2.1.6",
+    "uvicorn>=0.54.0",
+]

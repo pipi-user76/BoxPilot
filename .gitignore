@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.env
+.idea/
+.vscode/
+data/boxpilot.db
+data/artifacts/*
+!data/artifacts/.gitkeep
+*.log
