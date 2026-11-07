@@ -19,6 +19,11 @@
   box-sizing: border-box;
 }
 
+/* 组件布局使用 display:grid 后，必须显式保证 hidden 属性仍然生效。 */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--canvas);
@@ -113,6 +118,41 @@ h2 {
 .button:disabled {
   cursor: wait;
   opacity: 0.6;
+}
+
+.button.danger {
+  border-color: #f2c4bf;
+  background: #fff1f0;
+  color: var(--danger);
+}
+
+.button.danger:hover {
+  border-color: var(--danger);
+  background: #ffe4e1;
+}
+
+/* 行内操作按钮比主按钮更紧凑，避免挤压任务标题。 */
+.button.small {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.icon-button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  border-color: var(--accent);
+  color: var(--ink);
 }
 
 .health-badge,
@@ -232,23 +272,65 @@ select:focus {
   border-color: var(--accent);
 }
 
+/* 通用 input 样式会给复选框撑出 36px 高度，这里恢复它原本的尺寸。 */
+input[type="checkbox"] {
+  min-height: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.search-control input {
+  width: 210px;
+}
+
+.selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #f1f7f6;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.selection-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+}
+
 .task-list {
   display: grid;
 }
 
 .task-row {
-  width: 100%;
-  border: 0;
   border-bottom: 1px solid var(--line);
   background: #fff;
-  color: inherit;
-  padding: 14px 18px;
-  text-align: left;
+  padding: 12px 18px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 16px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
   align-items: center;
-  cursor: pointer;
 }
 
 .task-row:last-child {
@@ -258,6 +340,27 @@ select:focus {
 .task-row:hover,
 .task-row[aria-current="true"] {
   background: #f1f7f6;
+}
+
+/* 行主体仍是按钮，保留键盘可达性；复选框和操作按钮放在按钮之外。 */
+.task-main {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 16px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .task-name {
@@ -299,10 +402,31 @@ select:focus {
   color: var(--warning);
 }
 
+.status-badge[data-status="CANCELLED"] {
+  border-color: var(--line);
+  background: #f3f4f6;
+  color: var(--muted);
+}
+
 .task-time {
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+
+.pagination span {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .detail-panel {
@@ -355,6 +479,56 @@ select:focus {
   font-size: 12px;
 }
 
+/* 业务结论独立于任务执行状态，便于区分“执行成功”和“验收是否通过”。 */
+.result-summary {
+  margin-top: 16px;
+  padding: 11px 13px;
+  border-left: 4px solid var(--line);
+  background: #f7f8fa;
+}
+
+.result-summary[data-outcome="passed"] {
+  border-left-color: var(--success);
+  background: #f0f8f4;
+}
+
+.result-summary[data-outcome="failed"] {
+  border-left-color: var(--danger);
+  background: #fff5f4;
+}
+
+.result-summary[data-outcome="neutral"] {
+  border-left-color: var(--warning);
+  background: #fff9ed;
+}
+
+.result-summary-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.result-grid {
+  margin: 10px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.result-grid-item {
+  min-width: 0;
+}
+
+.result-grid dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.result-grid dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .detail-section {
   margin-top: 18px;
 }
@@ -395,6 +569,91 @@ select:focus {
   color: var(--danger);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.detail-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.artifact-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 预览弹窗使用原生 dialog，内容过长时在弹窗内部滚动。 */
+.preview-dialog {
+  width: min(920px, 92vw);
+  max-height: 88vh;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.preview-dialog::backdrop {
+  background: rgba(23, 32, 42, 0.45);
+}
+
+.preview-header,
+.preview-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.preview-header {
+  border-bottom: 1px solid var(--line);
+}
+
+.preview-header h2 {
+  margin: 0;
+  font-size: 15px;
+  word-break: break-all;
+}
+
+.preview-footer {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.preview-body {
+  padding: 16px 18px;
+  max-height: 62vh;
+  overflow: auto;
+}
+
+.preview-text {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f7f8fa;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.preview-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.preview-note {
+  margin: 0;
+  color: var(--muted);
 }
 
 .form-workspace {
@@ -462,11 +721,25 @@ select:focus {
   }
 
   .task-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .task-main {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .task-time {
     grid-column: 1 / -1;
+  }
+
+  .row-actions {
+    grid-column: 2;
+  }
+
+  .list-toolbar,
+  .search-control,
+  .search-control input {
+    width: 100%;
   }
 
   .summary-band {
@@ -483,6 +756,10 @@ select:focus {
   }
 
   .detail-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .result-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -191,6 +191,27 @@ class SandboxAdapter:
         except Exception as exc:
             return self._exception_failure(exc)
 
+    def get_page_markdown(self) -> dict[str, Any]:
+        """用 Readability 提取正文并转成 Markdown，去掉 SDK 附加的标题前缀。
+
+        SDK 返回的 markdown 形如 "Title: <标题>\nContent:\n<正文>"，前缀对正文预览是噪声，
+        因此在适配层统一剥离；标题单独返回，报告和页面结论仍可使用。
+        """
+        try:
+            response = self.client.browser_page.get_markdown()
+            if not response.success:
+                return self._failure("COMMAND_FAILED", response.message or "page markdown extraction failed")
+            data = response.data if isinstance(response.data, dict) else {"markdown": response.data}
+            title = str(data.get("title") or "").strip()
+            markdown = str(data.get("markdown") or "").strip()
+            if markdown.startswith("Title:"):
+                _, _, body = markdown.partition("Content:")
+                if body.strip():
+                    markdown = body.strip()
+            return {"success": True, "data": {"title": title, "markdown": markdown}, "error": None}
+        except Exception as exc:
+            return self._exception_failure(exc)
+
     def take_screenshot(self, save_path: str | Path, full_page: bool = False) -> dict[str, Any]:
         """消费截图流的每一个字节块并写入本地文件，最后校验文件非空。"""
         try:

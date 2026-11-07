@@ -48,3 +48,23 @@ def validate_http_url(url: str) -> str:
     if parsed.username or parsed.password:
         raise ValidationFailure("credentials in URLs are not allowed")
     return url
+
+
+def validate_git_url(url: str, allowed_hosts: set[str]) -> str:
+    """只允许白名单主机上的 HTTPS Git 仓库地址。
+
+    代码体检会执行仓库中的测试，因此首版不接受 SSH、未知域名、查询参数或 URL 凭据。
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValidationFailure("repository URL must use https")
+    if parsed.username or parsed.password:
+        raise ValidationFailure("credentials in repository URLs are not allowed")
+    if parsed.hostname.lower() not in allowed_hosts:
+        raise ValidationFailure("repository host is not trusted")
+    if parsed.query or parsed.fragment:
+        raise ValidationFailure("repository URL must not contain query or fragment")
+    path = parsed.path.rstrip("/")
+    if path.count("/") < 2 or not path.strip("/"):
+        raise ValidationFailure("repository URL must include owner and repository")
+    return url

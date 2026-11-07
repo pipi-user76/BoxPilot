@@ -17,12 +17,26 @@ class Settings(BaseSettings):
     SANDBOX_HEALTH_TIMEOUT_SECONDS: int = 5
     ARTIFACT_ROOT: Path = Path("artifacts")
     MAX_ARTIFACT_BYTES: int = 20 * 1024 * 1024
+    MAX_CSV_UPLOAD_BYTES: int = 5 * 1024 * 1024
+    TRUSTED_GIT_HOSTS: str = "github.com,gitee.com,gitlab.com"
+    REPO_TEST_TIMEOUT_SECONDS: int = 180
+    WEB_ACCEPTANCE_TIMEOUT_SECONDS: int = 60
+    ENABLE_DEMO_TASKS: bool = True
+    LOG_LEVEL: str = "INFO"
+    LOG_FILE: Path = Path("logs/boxpilot.jsonl")
+    TASK_PAGE_SIZE_DEFAULT: int = 20
+    TASK_PAGE_SIZE_MAX: int = 100
+    PREVIEW_TEXT_LIMIT: int = 200_000
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    def trusted_git_hosts(self) -> set[str]:
+        """把逗号分隔的仓库主机配置转换为小写集合。"""
+        return {host.strip().lower() for host in self.TRUSTED_GIT_HOSTS.split(",") if host.strip()}
 
 
 settings = Settings()

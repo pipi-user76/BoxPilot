@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -14,6 +13,11 @@ from fastapi.testclient import TestClient
 
 from backend.main import create_app
 from backend.storage import ArtifactStore
+
+try:
+    from tests.support import make_temp_dir, remove_temp_dir
+except ImportError:  # 兼容以 tests 目录为顶层的 unittest discover
+    from support import make_temp_dir, remove_temp_dir
 
 
 class FakeSandbox:
@@ -35,14 +39,14 @@ class FakeSandbox:
 class ApiTests(unittest.TestCase):
     def setUp(self) -> None:
         # 每个测试使用独立临时目录，避免产物或任务状态互相影响。
-        self.temp_dir = tempfile.TemporaryDirectory()
-        artifact_store = ArtifactStore(Path(self.temp_dir.name))
+        self.temp_dir = make_temp_dir()
+        artifact_store = ArtifactStore(self.temp_dir)
         self.client_context = TestClient(create_app(artifact_store=artifact_store, adapter=FakeSandbox()))
         self.client = self.client_context.__enter__()
 
     def tearDown(self) -> None:
         self.client_context.__exit__(None, None, None)
-        self.temp_dir.cleanup()
+        remove_temp_dir(self.temp_dir)
 
     def test_health_and_mock_task_end_to_end(self) -> None:
         """主链路：健康检查 -> 创建任务 -> 检查状态/步骤/产物 -> 下载。"""
@@ -57,6 +61,8 @@ class ApiTests(unittest.TestCase):
         detail = self.client.get(f"/tasks/{task_id}").json()
         self.assertEqual(detail["status"], "SUCCESS")
         self.assertEqual([step["status"] for step in detail["steps"]], ["SUCCESS", "SUCCESS", "SUCCESS"])
+        self.assertEqual(detail["steps"][0]["name"], "准备任务目录")
+        self.assertEqual(detail["result"]["summary"]["kind"], "mock")
         self.assertEqual(len(detail["artifacts"]), 1)
 
         artifact_id = detail["artifacts"][0]["id"]
@@ -74,17 +80,28 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("任务工作台", page.text)
 
-    def test_unregistered_template_is_rejected(self) -> None:
-        """正式模板未注册时必须明确拒绝，不能创建伪成功任务。"""
-        response = self.client.post("/tasks", json={"task_type": "WEB_DIGEST", "params": {"url": "https://example.com"}})
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(response.json()["detail"]["code"], "TEMPLATE_NOT_AVAILABLE")
+    def test_task_type_fields_have_hidden_style_guard(self) -> None:
+        """防止组件的 display 样式覆盖 hidden 属性，确保字段切换始终生效。"""
+        stylesheet = self.client.get("/ui/styles.css")
+        script = self.client.get("/ui/create_task.js")
+        self.assertEqual(stylesheet.status_code, 200)
+        self.assertIn("[hidden]", stylesheet.text)
+        self.assertIn("display: none !important", stylesheet.text)
+        self.assertEqual(script.status_code, 200)
+        self.assertIn("input.disabled = !visible", script.text)
+        task_script = self.client.get("/ui/task_list.js")
+        self.assertEqual(task_script.status_code, 200)
+        self.assertIn("renderResultSummary", task_script.text)
 
-    def test_csv_route_placeholder_is_available(self) -> None:
-        """CSV 占位路由应返回可识别的 501，而不是框架级 404。"""
+    def test_invalid_task_type_is_rejected(self) -> None:
+        """未知任务类型应在 Pydantic 校验阶段被拒绝。"""
+        response = self.client.post("/tasks", json={"task_type": "UNKNOWN", "params": {}})
+        self.assertEqual(response.status_code, 422)
+
+    def test_csv_upload_requires_file(self) -> None:
+        """CSV 上传接口缺少文件时必须返回 422。"""
         response = self.client.post("/tasks/csv")
-        self.assertEqual(response.status_code, 501)
-        self.assertEqual(response.json()["detail"]["code"], "CSV_ROUTE_NOT_IMPLEMENTED")
+        self.assertEqual(response.status_code, 422)
 
     def test_missing_task_returns_404(self) -> None:
         """不存在的任务应返回稳定错误码，便于前端显示。"""

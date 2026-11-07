@@ -6,6 +6,7 @@ InMemoryTaskStore 用于打通 API、调度器和测试，服务重启后数据�
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime, timezone
 from typing import Protocol
@@ -34,11 +35,32 @@ def get_db():
 
 class TaskStore(Protocol):
     """任务存储协议；调度器和路由只依赖这些方法，不关心 SQLite 细节。"""
-    def create_task(self, task_type: TaskType, params: dict) -> TaskRecord: ...
+    def create_task(
+        self,
+        task_type: TaskType,
+        params: dict,
+        *,
+        attempt: int = 1,
+        retry_of: str | None = None,
+    ) -> TaskRecord: ...
 
     def get_task(self, task_id: str) -> TaskRecord | None: ...
 
-    def list_tasks(self) -> list[TaskRecord]: ...
+    def list_tasks(
+        self,
+        *,
+        query: str = "",
+        statuses: list[TaskStatus] | None = None,
+        task_type: TaskType | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[TaskRecord], int]: ...
+
+    def count_tasks(self) -> dict[str, int]: ...
+
+    def delete_task(self, task_id: str) -> bool: ...
+
+    def purge_tasks(self, statuses: list[TaskStatus], older_than: datetime) -> list[str]: ...
 
     def start_task(self, task_id: str) -> TaskRecord: ...
 
@@ -76,8 +98,16 @@ class InMemoryTaskStore:
         # 后台调度线程与 HTTP 查询线程会并发访问，所有读写都经过同一把可重入锁。
         self._lock = threading.RLock()
 
-    def create_task(self, task_type: TaskType, params: dict) -> TaskRecord:
-        task = TaskRecord(task_type=task_type, params=params)
+    def create_task(
+        self,
+        task_type: TaskType,
+        params: dict,
+        *,
+        attempt: int = 1,
+        retry_of: str | None = None,
+    ) -> TaskRecord:
+        # 重试任务使用新的任务 ID，并通过 attempt/retry_of 保留来源关系。
+        task = TaskRecord(task_type=task_type, params=params, attempt=attempt, retry_of=retry_of)
         with self._lock:
             self._tasks[task.id] = task
         return task.model_copy(deep=True)
@@ -87,10 +117,80 @@ class InMemoryTaskStore:
             task = self._tasks.get(task_id)
             return task.model_copy(deep=True) if task else None
 
-    def list_tasks(self) -> list[TaskRecord]:
+    def list_tasks(
+        self,
+        *,
+        query: str = "",
+        statuses: list[TaskStatus] | None = None,
+        task_type: TaskType | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[TaskRecord], int]:
+        """按筛选条件返回当前页和命中总数；搜索覆盖任务 ID、类型、参数和错误信息。"""
         with self._lock:
-            tasks = sorted(self._tasks.values(), key=lambda item: item.created_at, reverse=True)
-            return [task.model_copy(deep=True) for task in tasks]
+            matched = [task for task in self._tasks.values() if self._matches(task, query, statuses, task_type)]
+            matched.sort(key=lambda item: item.created_at, reverse=True)
+            start = (page - 1) * page_size
+            visible = matched[start : start + page_size]
+            return [task.model_copy(deep=True) for task in visible], len(matched)
+
+    def count_tasks(self) -> dict[str, int]:
+        """统计全部任务的状态分布，供列表页概览使用。"""
+        with self._lock:
+            counts = {status.value: 0 for status in TaskStatus}
+            counts["total"] = len(self._tasks)
+            for task in self._tasks.values():
+                counts[task.status.value] += 1
+            return counts
+
+    def delete_task(self, task_id: str) -> bool:
+        """删除任务记录及其产物索引；磁盘文件由调用方同步清理。"""
+        with self._lock:
+            task = self._tasks.pop(task_id, None)
+            if task is None:
+                return False
+            for artifact in task.artifacts:
+                self._artifacts.pop(artifact.id, None)
+            return True
+
+    def purge_tasks(self, statuses: list[TaskStatus], older_than: datetime) -> list[str]:
+        """删除指定状态且创建时间早于截止时间的任务，返回被删除的任务 ID。"""
+        allowed = set(statuses)
+        with self._lock:
+            targets = [
+                task.id
+                for task in self._tasks.values()
+                if task.status in allowed and task.created_at < older_than
+            ]
+            for task_id in targets:
+                self.delete_task(task_id)
+            return targets
+
+    @staticmethod
+    def _matches(
+        task: TaskRecord,
+        query: str,
+        statuses: list[TaskStatus] | None,
+        task_type: TaskType | None,
+    ) -> bool:
+        if statuses and task.status not in statuses:
+            return False
+        if task_type is not None and task.task_type != task_type:
+            return False
+        needle = query.strip().lower()
+        if not needle:
+            return True
+        haystack = " ".join(
+            [
+                task.id,
+                task.task_type.value,
+                json.dumps(task.params, ensure_ascii=False),
+                task.error_code or "",
+                task.error_message or "",
+                " ".join(step.name for step in task.steps),
+            ]
+        ).lower()
+        return needle in haystack
 
     def start_task(self, task_id: str) -> TaskRecord:
         """将任务标记为运行中，并清除上一次残留错误。"""

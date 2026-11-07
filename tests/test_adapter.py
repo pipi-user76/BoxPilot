@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-import tempfile
 import unittest
 from pathlib import Path
 
 from backend.sandbox_client import SandboxAdapter
 from backend.storage import ArtifactStore
 from backend.validation import ValidationFailure, safe_relative_path, validate_http_url, validate_task_id
+
+try:
+    from tests.support import workspace_temp_dir
+except ImportError:  # 兼容以 tests 目录为顶层的 unittest discover
+    from support import workspace_temp_dir
 
 
 class SandboxPolicyTests(unittest.TestCase):
@@ -58,7 +62,7 @@ class SandboxPolicyTests(unittest.TestCase):
 class ArtifactStoreTests(unittest.TestCase):
     def test_artifact_round_trip_and_path_boundary(self) -> None:
         """验证产物写入、读取、大小记录和路径穿越拦截。"""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with workspace_temp_dir() as temp_dir:
             store = ArtifactStore(Path(temp_dir))
             spec = store.write_text("task-1", "result.txt", "ok")
             self.assertEqual(spec.size_bytes, 2)

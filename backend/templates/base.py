@@ -26,13 +26,15 @@ class TaskContext:
     task_id: str
     params: dict[str, Any]
     artifact_store: ArtifactStore
+    state: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class StepOutcome:
-    """步骤成功后的输出摘要与产物清单。"""
+    """步骤成功后的输出摘要、可选业务结论和产物清单。"""
     output: str = ""
     artifacts: list[ArtifactSpec] = field(default_factory=list)
+    result: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

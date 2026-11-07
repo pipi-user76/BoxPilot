@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
 from backend.db import InMemoryTaskStore, TaskStore
+from backend.logging_config import configure_logging
 from backend.models import HealthResponse, TaskType
 from backend.routes_csv import router as csv_router
 from backend.routes_tasks import router as tasks_router
@@ -23,7 +24,11 @@ from backend.sandbox_client import SandboxAdapter, sandbox_adapter
 from backend.scheduler import TaskRunner, build_runner
 from backend.storage import ArtifactStore
 from backend.templates.base import TaskTemplate
+from backend.templates.csv_analysis import CsvAnalysisTemplate
 from backend.templates.mock import MockTemplate
+from backend.templates.repo_check import RepoCheckTemplate
+from backend.templates.web_accept import WebAcceptTemplate
+from backend.templates.web_collect import WebDigestTemplate
 
 
 def create_app(
@@ -42,12 +47,17 @@ def create_app(
     )
     selected_templates = list(templates) if templates is not None else [
         (TaskType.MOCK, MockTemplate(selected_adapter)),
+        (TaskType.CSV_ANALYSIS, CsvAnalysisTemplate(selected_adapter)),
+        (TaskType.WEB_DIGEST, WebDigestTemplate(selected_adapter)),
+        (TaskType.REPO_CHECK, RepoCheckTemplate(selected_adapter)),
+        (TaskType.WEB_ACCEPTANCE, WebAcceptTemplate(selected_adapter)),
     ]
     selected_runner = build_runner(selected_store, selected_artifacts, selected_adapter, selected_templates)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # 启动时准备产物根目录，并把共享对象放入 app.state，避免路由自行创建全局状态。
+        configure_logging()
         selected_artifacts.root.mkdir(parents=True, exist_ok=True)
         app.state.task_store = selected_store
         app.state.artifact_store = selected_artifacts

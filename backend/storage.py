@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,3 +63,12 @@ class ArtifactStore:
         if not path.is_file():
             raise FileNotFoundError(relative_path)
         return path
+
+    def delete_task_dir(self, task_id: str) -> bool:
+        """删除单个任务的产物目录；路径必须严格位于产物根目录下一层。"""
+        validate_task_id(task_id)
+        task_dir = (self.root / task_id).resolve()
+        if task_dir.parent != self.root or not task_dir.is_dir():
+            return False
+        shutil.rmtree(task_dir)
+        return True

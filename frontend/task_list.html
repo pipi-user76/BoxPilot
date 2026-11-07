@@ -1,11 +1,11 @@
-<!-- 文件职责：任务工作台页面，由 task_list.js 轮询任务并展示步骤和下载入口。 -->
+<!-- 文件职责：任务工作台页面，由 task_list.js 负责搜索、分页、批量清理、预览和轮询。 -->
 <!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BoxPilot 任务工作台</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20261107-2">
 </head>
 <body>
   <header class="app-header">
@@ -50,23 +50,58 @@
             <h2>任务列表</h2>
             <p id="last-updated">等待加载</p>
           </div>
-          <label class="inline-control">
-            <span>状态</span>
-            <select id="status-filter">
-              <option value="">全部</option>
-              <option value="PENDING">等待中</option>
-              <option value="RUNNING">运行中</option>
-              <option value="SUCCESS">成功</option>
-              <option value="FAILED">失败</option>
-              <option value="TIMEOUT">超时</option>
-            </select>
-          </label>
+          <div class="list-toolbar">
+            <label class="inline-control search-control">
+              <span>搜索</span>
+              <input id="task-search" type="search" placeholder="任务 ID、类型或参数" autocomplete="off">
+            </label>
+            <label class="inline-control">
+              <span>状态</span>
+              <select id="status-filter">
+                <option value="">全部</option>
+                <option value="PENDING">等待中</option>
+                <option value="RUNNING">运行中</option>
+                <option value="SUCCESS">成功</option>
+                <option value="FAILED">失败</option>
+                <option value="TIMEOUT">超时</option>
+                <option value="CANCELLED">已取消</option>
+              </select>
+            </label>
+            <label class="inline-control">
+              <span>每页</span>
+              <select id="page-size">
+                <option value="10">10</option>
+                <option value="20" selected>20</option>
+                <option value="50">50</option>
+              </select>
+            </label>
+          </div>
         </div>
+
+        <!-- 选中任务后才显示批量操作，避免空状态占用版面。 -->
+        <div id="selection-bar" class="selection-bar" hidden>
+          <label class="checkbox-inline">
+            <input id="select-page" type="checkbox">
+            <span>全选本页</span>
+          </label>
+          <span id="selection-count">已选 0 项</span>
+          <div class="selection-actions">
+            <button id="batch-delete" class="button danger" type="button">批量删除</button>
+            <button id="cleanup" class="button secondary" type="button">清理 7 天前记录</button>
+          </div>
+        </div>
+
         <div id="task-list" class="task-list" aria-live="polite"></div>
         <div id="empty-state" class="empty-state" hidden>
           <strong>暂无任务</strong>
           <span>创建任务后将在这里显示状态和产物。</span>
         </div>
+
+        <nav id="pagination" class="pagination" aria-label="任务分页">
+          <button id="page-prev" class="button secondary" type="button">上一页</button>
+          <span id="page-info">第 1 / 1 页 · 共 0 项</span>
+          <button id="page-next" class="button secondary" type="button">下一页</button>
+        </nav>
       </div>
 
       <!-- 详情区由 JavaScript 动态填充，避免页面刷新打断轮询。 -->
@@ -79,6 +114,22 @@
     </section>
   </main>
 
-  <script src="task_list.js"></script>
+  <!-- 预览使用原生 dialog，文本与图片都不离开当前页面。 -->
+  <dialog id="preview-dialog" class="preview-dialog">
+    <div class="preview-header">
+      <div>
+        <p class="product-mark">产物预览</p>
+        <h2 id="preview-title">预览</h2>
+      </div>
+      <button id="preview-close" class="icon-button" type="button" aria-label="关闭预览">×</button>
+    </div>
+    <div id="preview-body" class="preview-body"></div>
+    <div class="preview-footer">
+      <span id="preview-meta"></span>
+      <a id="preview-download" class="button secondary" href="#" download>下载文件</a>
+    </div>
+  </dialog>
+
+  <script src="task_list.js?v=20261107-2"></script>
 </body>
 </html>

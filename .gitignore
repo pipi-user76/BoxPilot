@@ -13,3 +13,6 @@ data/artifacts/
 artifacts/*
 !artifacts/.gitkeep
 *.log
+.tmp/
+logs/
+runtime/

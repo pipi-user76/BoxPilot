@@ -15,10 +15,15 @@ const fieldMap = {
 };
 
 function updateFields() {
-  // 每种模板只显示自身需要的字段，防止用户提交无关参数。
+  // 每种模板只显示自身需要的字段，并禁用隐藏字段，防止误提交和旧值残留。
   const visibleFields = new Set(fieldMap[taskType.value] || []);
   document.querySelectorAll("[data-field]").forEach((field) => {
-    field.hidden = !visibleFields.has(field.dataset.field);
+    const visible = visibleFields.has(field.dataset.field);
+    field.hidden = !visible;
+    field.setAttribute("aria-hidden", String(!visible));
+    field.querySelectorAll("input, select, textarea").forEach((input) => {
+      input.disabled = !visible;
+    });
   });
 }
 
@@ -32,6 +37,7 @@ async function readError(response) {
 }
 
 taskType.addEventListener("change", updateFields);
+taskType.addEventListener("input", updateFields);
 updateFields();
 
 form.addEventListener("submit", async (event) => {

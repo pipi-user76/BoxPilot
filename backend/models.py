@@ -32,6 +32,12 @@ class TaskStatus(str, Enum):
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
     TIMEOUT = "TIMEOUT"
+    CANCELLED = "CANCELLED"
+
+
+TERMINAL_TASK_STATUSES = frozenset(
+    {TaskStatus.SUCCESS, TaskStatus.FAILED, TaskStatus.TIMEOUT, TaskStatus.CANCELLED}
+)
 
 
 class StepStatus(str, Enum):
@@ -82,11 +88,53 @@ class TaskRecord(BaseModel):
     result: dict[str, Any] | None = None
     error_code: str | None = None
     error_message: str | None = None
+    attempt: int = 1
+    retry_of: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     started_at: datetime | None = None
     finished_at: datetime | None = None
     steps: list[TaskStep] = Field(default_factory=list)
     artifacts: list[Artifact] = Field(default_factory=list)
+
+
+class TaskListResponse(BaseModel):
+    """分页任务列表；counts 统计全部任务，不受当前筛选条件影响。"""
+    items: list[TaskRecord]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    counts: dict[str, int]
+
+
+class BatchDeleteRequest(BaseModel):
+    """批量清理指定任务；运行中的任务会被跳过而不是强制终止。"""
+    task_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class BatchDeleteResponse(BaseModel):
+    deleted: int
+    skipped: list[str] = Field(default_factory=list)
+
+
+class CleanupRequest(BaseModel):
+    """按状态和创建时间清理历史任务，默认只删除 7 天前已结束的任务。"""
+    statuses: list[TaskStatus] = Field(
+        default_factory=lambda: [TaskStatus.SUCCESS, TaskStatus.FAILED, TaskStatus.TIMEOUT, TaskStatus.CANCELLED]
+    )
+    older_than_days: int = Field(default=7, ge=0, le=365)
+
+
+class ArtifactPreviewResponse(BaseModel):
+    """产物预览元数据；文本内容受长度限制，图片由前端直接加载下载地址。"""
+    id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    kind: str
+    text: str | None = None
+    truncated: bool = False
+    url: str
 
 
 class HealthResponse(BaseModel):
