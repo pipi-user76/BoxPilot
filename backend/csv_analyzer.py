@@ -56,6 +56,8 @@ def analyze_csv(input_path: Path) -> dict:
                 "type": "integer" if integer_values else "number",
                 "count": len(non_empty),
                 "missing": missing,
+                "unique": len(set(non_empty)),
+                "examples": non_empty[:3],
                 "min": min(numbers),
                 "max": max(numbers),
                 "mean": statistics.fmean(numbers),
@@ -63,19 +65,29 @@ def analyze_csv(input_path: Path) -> dict:
                 "stdev": statistics.stdev(numbers) if len(numbers) >= 2 else 0.0,
             }
         else:
+            counts: dict[str, int] = {}
+            for value in non_empty:
+                counts[value] = counts.get(value, 0) + 1
+            top_values = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:3]
             columns[name] = {
                 "type": "string",
                 "count": len(non_empty),
                 "missing": missing,
-                "unique": len(set(non_empty)),
+                "unique": len(counts),
+                "examples": non_empty[:3],
+                "top_values": [{"value": value, "count": count} for value, count in top_values],
             }
 
     normalized_rows = [tuple(cell.strip() for cell in row) for row in data_rows]
+    missing_cells = sum(column["missing"] for column in columns.values())
+    total_cells = len(data_rows) * len(header)
     return {
         "rows": len(data_rows),
         "columns": len(header),
         "column_names": header,
         "duplicate_rows": len(normalized_rows) - len(set(normalized_rows)),
+        "missing_cells": missing_cells,
+        "completeness": round((1 - missing_cells / total_cells) * 100, 1) if total_cells else 100.0,
         "column_summary": columns,
     }
 

@@ -236,13 +236,24 @@ function renderPagination() {
   elements.pageNext.disabled = state.page >= state.pages;
 }
 
+function technicalDetails(text) {
+  const details = element("details", "technical-details");
+  details.append(element("summary", "", "技术详情"), element("pre", "", text));
+  return details;
+}
+
 function renderStep(step) {
   const item = element("li", "step-item");
   const content = element("div");
   const stepName = stepDisplayNames[step.name] || step.name;
   content.append(element("strong", "", `${step.step_index}. ${stepName}`));
-  if (step.output) content.append(element("small", "", step.output));
-  if (step.error_message) content.append(element("small", "error-text", step.error_message));
+  if (step.error_message) {
+    // 失败步骤先给用户看得懂的说明，原始命令输出收进折叠区。
+    content.append(element("small", "error-text", step.error_message));
+    if (step.output) content.append(technicalDetails(step.output));
+  } else if (step.output) {
+    content.append(element("small", "", step.output));
+  }
   const badge = element("span", "status-badge", statusLabels[step.status] || step.status);
   badge.dataset.status = step.status;
   item.append(content, badge);
@@ -289,7 +300,8 @@ function renderResultSummary(task) {
     grid.append(
       resultGridItem("页面标题", summary.title || "未获取"),
       resultGridItem("正文提取", summary.extraction === "text" ? "纯文本回退" : "Readability 去噪"),
-      resultGridItem("正文长度", `${summary.markdown_length ?? summary.text_length ?? 0} 个字符`),
+      resultGridItem("正文词数", `${summary.words ?? 0} 词`),
+      resultGridItem("预计阅读", `${summary.reading_time_minutes ?? 1} 分钟`),
       resultGridItem("页面状态", summary.http_status ? `HTTP ${summary.http_status}` : "未获取"),
     );
   } else if (summary.kind === "repo_check") {
@@ -363,12 +375,22 @@ function renderDetail(task) {
 
   content.append(heading, meta, detailActions);
 
+  if (task.status === "RUNNING") {
+    const startedAt = task.started_at ? new Date(task.started_at).getTime() : Date.now();
+    const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+    const text = seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${seconds} 秒`;
+    content.append(element("p", "running-note", `已运行 ${text}；步骤长时间无响应会自动超时结束。`));
+  }
+
   const resultSummary = renderResultSummary(task);
   if (resultSummary) content.append(resultSummary);
 
   if (task.error_message) {
     const error = element("section", "detail-section");
-    error.append(element("h3", "", "错误信息"), element("p", "error-text", `${task.error_code}: ${task.error_message}`));
+    error.append(element("h3", "", "错误信息"), element("p", "error-text", task.error_message));
+    if (task.error_code) error.append(element("small", "error-code", `错误码：${task.error_code}`));
+    const failedStep = task.steps?.find((step) => step.error_message && step.output);
+    if (failedStep) error.append(technicalDetails(failedStep.output));
     content.append(error);
   }
 

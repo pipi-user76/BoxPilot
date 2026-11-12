@@ -2,6 +2,22 @@
 
 BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任务、按固定步骤调用沙箱并记录状态、步骤与产物，最终通过 HTTP 提供查询和下载。
 
+## 项目定位
+
+浏览器能打开网页，Git 客户端能拉仓库，为什么还需要这个项目？区别在于“看一次”和“反复按同一标准检查并留下记录”。
+
+适合用 BoxPilot 的场景：
+
+- 同一套检查要周期性重复，例如每次发版前确认页面标题、截图和仓库测试结果。
+- 多人协作时需要统一口径，避免每个人看到的结果和结论不一致。
+- 检查结论需要留档，产物包含截图、报告和原始日志，可回溯到具体任务。
+- 需要批量或无人值守执行，例如一次提交多个页面验收。
+
+不适合的场景：
+
+- 只想临时看一眼网页或仓库，直接用浏览器和 Git 客户端更快。
+- 需要人工判断的探索性工作，固定步骤反而限制发挥。
+
 ## 当前进度
 
 更新时间：2026-11-07。当前状态为“四个模板可运行，具备取消、重试、结构化日志、搜索分页、批量清理和产物预览”。
@@ -10,21 +26,21 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 |---|---|---|
 | FastAPI 与任务 API | 已完成 | 创建、搜索分页列表、详情、取消、重试、批量删除、清理、产物预览与下载 |
 | AIO Sandbox 适配 | 已完成 | Shell、文件、浏览器、Readability 正文提取、整页截图、上传和下载 |
-| 任务调度 | 已完成 | 固定步骤、状态流转、失败停止、串行执行锁、步骤边界取消、失败重试 |
+| 任务调度 | 已完成 | 固定步骤、状态流转、失败停止、串行执行锁、步骤边界取消、失败重试、步骤与任务超时兜底 |
 | 结构化日志 | 已完成 | JSON Lines 输出到 stdout 与 `logs/boxpilot.jsonl`（5 MB × 3 轮转） |
-| 网页资料整理 `WEB_DIGEST` | 已完成 | `article.md`、`page.txt`、整页 `screenshot.png`、`web-digest.json` |
-| CSV 分析 `CSV_ANALYSIS` | 已完成 | multipart 上传、标准库分析、`summary.json`、`report.txt` |
-| 仓库体检 `REPO_CHECK` | 已完成 | 白名单仓库、固定测试命令、离线 `demo://python` |
+| 网页资料整理 `WEB_DIGEST` | 已完成 | `article.md` 去噪正文、整页 `screenshot.png`、`web-digest.json`（词数、阅读时长、标题数、链接数、图片数） |
+| CSV 分析 `CSV_ANALYSIS` | 已完成 | multipart 上传、标准库分析、`summary.json`（列类型、缺失、唯一值、高频值）、中文 `report.md` |
+| 仓库体检 `REPO_CHECK` | 已完成 | 白名单仓库、固定测试命令、离线 `demo://python`、失败重试、中文错误说明与失败报告；默认用 uv 在任务目录建独立虚拟环境，按 `requires-python` 选或现场补装 3.13/3.12/3.11/3.10，装完依赖再补 pytest 并尽量把项目装成可编辑包 |
 | 网页验收 `WEB_ACCEPTANCE` | 已完成 | 标题比对、截图、`acceptance.json` |
 | Web 工作台 | 已完成进阶版 | 服务端搜索与分页、批量清理、取消/重试、任务结论、文本与图片预览 |
 | SQLite 持久化 | 待接入 | 当前仍使用内存 `TaskStore`，重启后任务记录丢失 |
-| 10 至 15 个系统样例 | 进行中 | 已有 42 项自动化测试，尚需形成统一验收表和统计报告 |
+| 10 至 15 个系统样例 | 进行中 | 已有 44 项自动化测试，尚需形成统一验收表和统计报告 |
 
 当前已注册 `MOCK`、`CSV_ANALYSIS`、`WEB_DIGEST`、`REPO_CHECK` 和 `WEB_ACCEPTANCE`。未知任务类型会返回明确校验错误，不会生成伪成功任务。
 
 最近验证结果：
 
-- 42 项 Python 测试中 41 项执行通过，1 项真实沙箱集成测试默认跳过。
+- 44 项 Python 测试中 43 项执行通过，1 项真实沙箱集成测试默认跳过。
 - 真实 `WEB_DIGEST` 使用沙箱 Readability 去噪，产物为 4 个文件，整页截图约 75 KB。
 - 真实取消任务在步骤边界落为 `CANCELLED`，失败任务重试生成 `attempt=2` 且 `retry_of` 指向原任务。
 - 列表分页、搜索、批量清理、文本预览和图片预览均已通过浏览器联调。
@@ -41,7 +57,7 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 | P2 | 11/18-11/24 | 认证、限流与独立沙箱隔离评估 | 非本机访问时必须携带凭据 |
 | P2 | 11/25-12/04 | README、设计文档、演示数据、演示视频和发布检查 | 在干净环境按文档启动并完成现场演示 |
 
-已知限制：公开 GitHub 仓库在当前沙箱网络下可能出现 TLS 握手失败，仓库体检现场演示优先使用 `demo://python`；内存任务存储尚未替换，服务重启后任务与日志外的运行状态丢失。
+已知限制：沙箱网络受限时，公开仓库克隆可能超时或被拒绝；系统会自动重试一次，并给出中文原因和替代方案，现场演示优先使用 `demo://python`。内存任务存储尚未替换，服务重启后任务与日志外的运行状态丢失。
 
 ## 环境要求
 
@@ -96,7 +112,7 @@ uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-预期结果：`Ran 42 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 41 项使用替身沙箱，不需要 Docker。
+预期结果：`Ran 44 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 43 项使用替身沙箱，不需要 Docker。
 
 运行真实沙箱集成测试：
 
@@ -146,9 +162,26 @@ $env:BOXPILOT_RUN_SANDBOX_TESTS='1'
 
 CSV 分析使用 `POST /tasks/csv` 的 multipart 表单上传，字段名为 `file`，只接受不超过 5 MB 的 `.csv` 文件。
 
+仓库体检默认就会准备测试环境：克隆后按仓库的 `requires-python` 挑解释器，用 uv 在任务目录建 `.venv`，安装声明依赖、补 pytest，并尝试以可编辑方式安装项目本身。
+
+```json
+{
+  "task_type": "REPO_CHECK",
+  "params": {"repo_url": "https://github.com/pypa/sampleproject"}
+}
+```
+
+只想做浅层检查、跳过下载和安装时，显式传 `"install_deps": false`。安装结果写 `install-result.json`，安装失败时额外保留 `install.log`，结论写进 Markdown 报告。
+
+沙箱镜像自带 3.10 和 3.12。仓库要求 3.13 时，会先用 `uv python install` 现场补装；解释器下载默认走 npmmirror 镜像（`UV_PYTHON_INSTALL_MIRROR`），实测三秒内装好 3.13.6。补装失败才会降级：改用现有最高版本试跑，并在报告里注明结果仅供参考；要严格校验，传 `"allow_version_mismatch": false`。
+
+沙箱直连 PyPI 经常超时，默认已改用阿里云镜像（`UV_INDEX_URL`）；要恢复官方源，把它显式设为空字符串。镜像源只影响下载，不改变测试命令。
+
 完整字段与团队对接约定见 [docs/interface_contract.md](docs/interface_contract.md)。
 
 人工操作步骤见 [docs/manual_testing.md](docs/manual_testing.md)。
+
+安全边界、信任模型与已知缺口见 [docs/security.md](docs/security.md)。
 
 当前阶段进展见 [docs/progress_report_2026-11-07.md](docs/progress_report_2026-11-07.md)，纯文本汇报见 [docs/progress_report_2026-11-07.txt](docs/progress_report_2026-11-07.txt)，上一阶段见 [docs/progress_report_2026-11-06.md](docs/progress_report_2026-11-06.md)。
 
@@ -209,4 +242,5 @@ docs/                接口契约与验收记录
 
 - 当前任务存储为内存实现，服务重启后任务记录丢失；等待陈咏忻接入 SQLite 四表。
 - 运行中任务的取消在步骤边界生效，正在执行的 Shell 或浏览器动作不会被强制终止。
-- 当前公开仓库体检可能受沙箱网络出口影响，离线演示使用 `demo://python`。
+- 当前公开仓库体检可能受沙箱网络出口影响：克隆会失败重试，装依赖也可能超时；离线演示使用 `demo://python`。
+- 沙箱自带 Python 3.10 与 3.12；3.13 在任务开始时按需补装，镜像不可达时才会降级试跑并在报告里标注。

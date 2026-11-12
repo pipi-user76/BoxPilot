@@ -10,7 +10,9 @@
 PENDING -> RUNNING -> SUCCESS / FAILED / TIMEOUT / CANCELLED
 ```
 
-`CANCELLED` 为新增终态。等待中的任务可立即取消；运行中的任务在“步骤之间”检查取消请求，当前步骤执行完毕后落为 `CANCELLED`，不会留下半写产物。每个步骤状态为 `RUNNING`、`SUCCESS` 或 `FAILED`。失败时停止后续步骤，并保留错误码和错误信息。
+`CANCELLED` 为新增终态。等待中的任务可立即取消；运行中的任务由调度器每 0.25 秒检查一次取消请求，可以在步骤执行期间生效，不会留下半写产物。每个步骤状态为 `RUNNING`、`SUCCESS` 或 `FAILED`。失败时停止后续步骤，并保留错误码和错误信息。
+
+超时同样有两条兜底：单步超过 `STEP_TIMEOUT_SECONDS`（默认 240 秒）落为 `STEP_TIMEOUT`，任务总时长超过 `TASK_TIMEOUT_SECONDS`（默认 900 秒）落为 `TASK_TIMEOUT`，两种情况任务状态均为 `TIMEOUT`。步骤动作放在守护线程里执行，调度器只等待有限时间，避免沙箱请求卡死拖住全局执行锁。
 
 重试不修改原任务，而是创建新任务：`attempt = 原任务.attempt + 1`，`retry_of = 原任务 ID`。只有 `FAILED`、`TIMEOUT`、`CANCELLED` 可重试。
 
@@ -121,7 +123,7 @@ purge_tasks(statuses, older_than) -> list[str]
 - 文件不能为空，最大 5 MB。
 - 文件保存为任务目录中的 `input.csv`。
 - 创建任务后调用统一调度器，不另建执行流程。
-- 产物为 `summary.json` 和 `report.txt`。
+- 产物为 `summary.json` 和中文 `report.md`。
 
 通过普通 JSON 接口提交 `CSV_ANALYSIS` 会返回 `422 CSV_UPLOAD_REQUIRED`。
 
@@ -190,7 +192,9 @@ take_screenshot(save_path, full_page=False) -> dict
 {"success": false, "data": null, "error": {"code": "TIMEOUT", "message": "..."}}
 ```
 
-固定错误码：`VALIDATION_ERROR`、`SANDBOX_UNAVAILABLE`、`TIMEOUT`、`COMMAND_BLOCKED`、`COMMAND_FAILED`、`FILE_NOT_FOUND`、`ARTIFACT_EMPTY`、`INTERNAL_ERROR`。
+固定错误码：`VALIDATION_ERROR`、`SANDBOX_UNAVAILABLE`、`TIMEOUT`、`COMMAND_BLOCKED`、`COMMAND_FAILED`、`FILE_NOT_FOUND`、`ARTIFACT_EMPTY`、`INTERNAL_ERROR`、`STEP_TIMEOUT`、`TASK_TIMEOUT`，以及仓库克隆相关的 `REPO_UNREACHABLE`、`REPO_NOT_FOUND`、`REPO_AUTH_REQUIRED`、`REPO_TRANSFER_FAILED`、`REPO_TLS_FAILED`、`CLONE_FAILED`。
+
+仓库克隆失败时，`error_message` 只放“发生了什么、可以怎么办”的中文说明；git 原始输出放在失败步骤的 `output` 字段，前端折叠为“技术详情”。
 
 ## 6. 模板契约
 
@@ -215,9 +219,9 @@ TaskType.WEB_ACCEPTANCE: WebAcceptanceTemplate(...)
 
 当前已实现并注册：
 
-- `CSV_ANALYSIS`：必须通过 `POST /tasks/csv` 上传，生成 `summary.json` 和 `report.txt`。
-- `WEB_DIGEST`：参数 `url`，用 Readability 提取正文、截整页图，生成 `article.md`、`page.txt`、`screenshot.png` 和 `web-digest.json`；`summary` 含 `extraction`、`markdown_length`、`full_page`、`screenshot_bytes`。
-- `REPO_CHECK`：参数 `repo_url`，必须是 `TRUSTED_GIT_HOSTS` 内的 HTTPS 仓库；离线演示使用 `demo://python`，生成 `check-report.json` 和 `test.log`。
+- `CSV_ANALYSIS`：必须通过 `POST /tasks/csv` 上传，生成 `summary.json` 和中文 `report.md`；`summary` 含行数、列数、重复行、缺失值、完整度。
+- `WEB_DIGEST`：参数 `url`，用 Readability 提取正文、截整页图，生成 `article.md`、`screenshot.png` 和 `web-digest.json`；`web-digest.json` 的 `content` 含字符数、词数、预计阅读分钟、标题数、链接数、图片数，`summary` 含 `words`、`reading_time_minutes`、`extraction`、`full_page`、`screenshot_bytes`。
+- `REPO_CHECK`：参数 `repo_url`，必须是 `TRUSTED_GIT_HOSTS` 内的 HTTPS 仓库；`install_deps` 默认 `true`（界面不再暴露开关，传 `false` 可跳过安装，只做浅层检查）。执行“准备测试环境”步骤：用 uv 在任务目录建 `.venv`，按仓库 `requires-python` 从 3.13、3.12、3.11、3.10 中选可用解释器；镜像里没有所需版本时，先用 `uv python install` 补装（解释器源由 `UV_PYTHON_INSTALL_MIRROR` 控制，默认 npmmirror），补装失败再回退到降级策略。随后安装声明依赖，补 pytest，并尝试 `uv pip install --no-deps -e .`。沙箱缺少满足要求的解释器时，`allow_version_mismatch`（默认 `true`）允许降一档试跑并在报告标注 `version_relaxed`，设为 `false` 则直接给出版本不匹配结论。超时由 `REPO_INSTALL_TIMEOUT_SECONDS`、`REPO_PYTHON_INSTALL_TIMEOUT_SECONDS` 控制，包源和解释器源分别由 `UV_INDEX_URL`、`UV_PYTHON_INSTALL_MIRROR` 覆盖。安装结果写入沙箱内的 `install-result.json`；安装失败时才额外保留 `install.log`。离线演示使用 `demo://python`，生成 `check-report.md`、`check-report.json` 与 `test.log`；克隆重试过才有 `clone.log`。报告中的 `test_status` 取 `passed`、`failed`、`not_run`、`error`：版本不满足、依赖装不上、缺 pytest 都记为 `error` 并在 `test_note` 说明；没有可运行用例记为 `not_run`。
 - `WEB_ACCEPTANCE`：参数 `url`、`expected_title`，生成 `acceptance.json` 和 `page.png`。
 
 仓库测试失败和网页标题不匹配都属于有效检查结果，任务状态仍为 `SUCCESS`；访问失败、超时或产物缺失才使任务失败。

@@ -11,6 +11,7 @@ import threading
 import time
 from collections.abc import Iterable
 
+from backend.config import settings
 from backend.db import TaskStore
 from backend.logging_config import get_logger
 from backend.models import (
@@ -23,7 +24,13 @@ from backend.models import (
 )
 from backend.sandbox_client import SandboxAdapter
 from backend.storage import ArtifactStore
-from backend.templates.base import StepExecutionError, TaskContext, TaskTemplate
+from backend.templates.base import (
+    StepDefinition,
+    StepExecutionError,
+    StepOutcome,
+    TaskContext,
+    TaskTemplate,
+)
 
 
 class TaskNotFound(KeyError):
@@ -186,11 +193,22 @@ class TaskRunner:
         context = TaskContext(task_id=task_id, params=task.params, artifact_store=self.artifact_store)
         completed_steps: list[str] = []
         task_result: dict = {}
+        task_deadline = time.monotonic() + max(1, settings.TASK_TIMEOUT_SECONDS)
         try:
             for index, definition in enumerate(template.steps, start=1):
                 # 只在线性步骤之间响应取消，已写入的产物保持可下载、可审查。
                 if self._is_cancel_requested(task_id):
                     self._finish_cancelled(task_id, task.task_type, completed_steps, task_result)
+                    return
+
+                remaining = int(task_deadline - time.monotonic())
+                if remaining <= 0:
+                    message = f"任务总时长超过 {settings.TASK_TIMEOUT_SECONDS} 秒，已自动结束。"
+                    self.store.finish_task(task_id, TaskStatus.TIMEOUT, None, "TASK_TIMEOUT", message)
+                    self.log.warning(
+                        "task_timeout",
+                        extra={"task_id": task_id, "step": definition.name, "step_index": index},
+                    )
                     return
 
                 step = self.store.add_step(task_id, index, definition.name)
@@ -199,8 +217,28 @@ class TaskRunner:
                     "step_started",
                     extra={"task_id": task_id, "step": definition.name, "step_index": index},
                 )
+                limit = min(definition.timeout_seconds or settings.STEP_TIMEOUT_SECONDS, remaining)
                 try:
-                    outcome = definition.action(context)
+                    status, outcome = self._run_step(definition.action, context, task_id, limit)
+                    if status == "cancelled":
+                        self._finish_cancelled(task_id, task.task_type, completed_steps, task_result)
+                        return
+                    if status == "timeout":
+                        message = f"步骤执行超过 {limit} 秒仍未返回，已停止等待并结束任务。"
+                        self.store.finish_step(step.id, StepStatus.FAILED, None, "STEP_TIMEOUT", message)
+                        self.store.finish_task(task_id, TaskStatus.TIMEOUT, None, "STEP_TIMEOUT", message)
+                        self.log.warning(
+                            "step_timeout",
+                            extra={
+                                "task_id": task_id,
+                                "step": definition.name,
+                                "step_index": index,
+                                "timeout_seconds": limit,
+                            },
+                        )
+                        return
+                    if outcome is None:
+                        raise StepExecutionError("INTERNAL_ERROR", "步骤没有返回结果")
                     # 只有非空产物才登记，防止“命令说成功但实际没有文件”。
                     for spec in outcome.artifacts:
                         if spec.size_bytes <= 0:
@@ -228,8 +266,27 @@ class TaskRunner:
                         },
                     )
                 except StepExecutionError as exc:
-                    # 业务步骤失败会同时落库步骤错误和任务错误，前端可直接展示。
-                    self.store.finish_step(step.id, StepStatus.FAILED, None, exc.code, exc.message)
+                    # 面向用户的错误信息与原始输出分开保存：前者直接展示，后者折叠在“技术详情”。
+                    # 失败前已写好的产物（例如克隆失败说明）仍登记，避免用户拿不到任何结果。
+                    for spec in exc.artifacts:
+                        if spec.size_bytes <= 0:
+                            continue
+                        self.store.add_artifact(
+                            Artifact(
+                                task_id=task_id,
+                                filename=spec.filename,
+                                relative_path=spec.filename,
+                                content_type=spec.content_type,
+                                size_bytes=spec.size_bytes,
+                            )
+                        )
+                    self.store.finish_step(
+                        step.id,
+                        StepStatus.FAILED,
+                        (exc.detail or None),
+                        exc.code,
+                        exc.message,
+                    )
                     self.store.finish_task(task_id, TaskStatus.FAILED, None, exc.code, exc.message)
                     self.log.warning(
                         "step_failed",
@@ -272,6 +329,41 @@ class TaskRunner:
                 "step_count": len(completed_steps),
             },
         )
+
+    def _run_step(
+        self,
+        action,
+        context: TaskContext,
+        task_id: str,
+        timeout_s: int,
+    ) -> tuple[str, StepOutcome | None]:
+        """在守护线程里执行一步，主线程只等待有限时间。
+
+        沙箱 HTTP 调用偶发会一直不返回；如果直接同步调用，任务会永久停在 RUNNING，
+        并且占着全局执行锁让后续任务永远排队。这里用“有限等待 + 轮询取消”兜底：
+        超时或取消时放弃等待，线程留在后台自行结束，调度器先把状态落库。
+        """
+        outcome_holder: list[StepOutcome] = []
+        error_holder: list[BaseException] = []
+
+        def invoke() -> None:
+            try:
+                outcome_holder.append(action(context))
+            except BaseException as exc:  # noqa: BLE001 - 原样转交给调用方处理
+                error_holder.append(exc)
+
+        worker = threading.Thread(target=invoke, name=f"step-{task_id}", daemon=True)
+        worker.start()
+        deadline = time.monotonic() + timeout_s
+        while worker.is_alive():
+            if self._is_cancel_requested(task_id):
+                return "cancelled", None
+            if time.monotonic() >= deadline:
+                return "timeout", None
+            worker.join(0.25)
+        if error_holder:
+            raise error_holder[0]
+        return "ok", outcome_holder[0] if outcome_holder else None
 
     def _finish_cancelled(
         self,

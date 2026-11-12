@@ -1,7 +1,7 @@
-"""文件职责：把上传 CSV 送入沙箱分析，并归档 JSON 摘要与文本报告。
+"""文件职责：把上传 CSV 送入沙箱分析，并归档 JSON 摘要与中文 Markdown 报告。
 
 CSV 输入由 POST /tasks/csv 保存到当前任务目录的 input.csv。本模板负责上传分析脚本、
-执行固定命令、下载 summary.json，并生成人类可读的 report.txt。
+执行固定命令、下载 summary.json，并生成人类可读的 report.md。
 """
 
 from __future__ import annotations
@@ -86,35 +86,62 @@ class CsvAnalysisTemplate:
             content_type="application/json",
             size_bytes=summary_path.stat().st_size,
         )
+        rows = summary.get("rows")
+        columns = summary.get("columns")
+        duplicate_rows = summary.get("duplicate_rows")
+        missing_values = int(summary.get("missing_cells") or 0)
+        completeness = summary.get("completeness", 100.0)
+        input_kb = max(1, round(context.state["input_path"].stat().st_size / 1024))
+        type_labels = {"integer": "整数", "number": "数值", "string": "文本"}
         report_lines = [
-            "BoxPilot CSV Analysis Report",
-            f"Rows: {summary.get('rows')}",
-            f"Columns: {summary.get('columns')}",
-            f"Duplicate rows: {summary.get('duplicate_rows')}",
+            "# CSV 分析报告",
             "",
-            "Column summary:",
+            f"- 文件：input.csv（{input_kb} KB）",
+            f"- 数据规模：{rows} 行 × {columns} 列",
+            f"- 重复行：{duplicate_rows}",
+            f"- 缺失值：{missing_values} 个（完整度 {completeness}%）",
+            "",
+            "## 列概览",
+            "",
+            "| 列名 | 类型 | 非空 | 缺失 | 唯一值 | 摘要 |",
+            "| --- | --- | ---: | ---: | ---: | --- |",
         ]
         for name, column in summary.get("column_summary", {}).items():
-            report_lines.append(f"- {name}: {json.dumps(column, ensure_ascii=False)}")
+            label = type_labels.get(column.get("type"), column.get("type"))
+            if column.get("type") in {"integer", "number"}:
+                detail = (
+                    f"最小 {column.get('min')}，最大 {column.get('max')}，"
+                    f"均值 {column.get('mean'):.2f}"
+                )
+            else:
+                examples = "、".join(column.get("examples", []))
+                tops = "、".join(
+                    f"{item['value']}({item['count']})" for item in column.get("top_values", [])
+                )
+                detail = f"示例：{examples}" + (f"；高频：{tops}" if tops else "")
+            report_lines.append(
+                f"| {name} | {label} | {column.get('count')} | {column.get('missing')} | "
+                f"{column.get('unique')} | {detail} |"
+            )
         report_spec = context.artifact_store.write_text(
             context.task_id,
-            "report.txt",
+            "report.md",
             "\n".join(report_lines) + "\n",
         )
         context.state["summary"] = summary
-        missing_values = sum(int(column.get("missing", 0)) for column in summary.get("column_summary", {}).values())
         return StepOutcome(
             output=(
-                f"分析完成：{summary.get('rows')} 行、{summary.get('columns')} 列，"
-                f"{summary.get('duplicate_rows')} 个重复行，{missing_values} 个缺失值"
+                f"分析完成：{rows} 行、{columns} 列，"
+                f"{duplicate_rows} 个重复行，{missing_values} 个缺失值，完整度 {completeness}%"
             ),
             artifacts=[summary_spec, report_spec],
             result={
                 "kind": "csv_analysis",
                 "message": "CSV 分析完成",
-                "rows": summary.get("rows"),
-                "columns": summary.get("columns"),
-                "duplicate_rows": summary.get("duplicate_rows"),
+                "rows": rows,
+                "columns": columns,
+                "duplicate_rows": duplicate_rows,
                 "missing_values": missing_values,
+                "completeness": completeness,
             },
         )

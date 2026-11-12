@@ -97,11 +97,10 @@ BoxPilot scheduler smoke test completed successfully.
 预期任务状态为 `SUCCESS`，生成：
 
 - `article.md`：Readability 去噪后的正文，保留 Markdown 链接。
-- `page.txt`：页面可见文本。
 - `screenshot.png`：整页截图。
-- `web-digest.json`：URL、标题、HTTP 状态、文本长度、提取方式和产物清单。
+- `web-digest.json`：URL、标题、HTTP 状态、提取方式，以及 `content` 里的字符数、词数、预计阅读分钟、标题数、链接数和图片数。
 
-详情页的“任务结论”区应显示 `正文提取：Readability 去噪`、正文字符数、HTTP 状态和截图大小。
+详情页的“任务结论”区应显示 `正文提取：Readability 去噪`、正文词数、预计阅读时长、HTTP 状态和截图大小。
 
 如果页面无法打开或页面文本为空，任务应失败，不生成伪成功任务。
 
@@ -121,8 +120,8 @@ C,,y
 
 预期任务状态为 `SUCCESS`，生成：
 
-- `summary.json`：4 行、3 列、1 个重复行、`score` 列 1 个缺失值。
-- `report.txt`：人类可读的分析报告。
+- `summary.json`：4 行、3 列、1 个重复行、`score` 列 1 个缺失值、完整度 91.7%，并带每列的类型、唯一值、示例和高频值。
+- `report.md`：中文分析报告，含列概览表格。
 
 空文件、非 `.csv` 文件或超过 5 MB 的文件应被明确拒绝。
 
@@ -180,11 +179,16 @@ C,,y
 
 预期：
 
-- 五个步骤全部为 `SUCCESS`。
-- 生成 `check-report.json` 和 `test.log`。
+- 六个步骤全部为 `SUCCESS`，其中“准备测试环境”负责选解释器和装依赖。
+- 生成 `check-report.md`、`check-report.json`、`test.log`；克隆重试过才保留 `clone.log`，安装失败才保留 `install.log`，成功时不再产生这两份日志。
+- 报告首页是中文摘要：仓库、项目类型、结论、测试命令、退出码、克隆次数、仓库要求 Python、实际使用 Python、依赖准备状态；JSON 只保留同样的结论字段，不再堆原始输出。
 - 报告中 `toolchain` 为 `python-unittest`，`test_status` 为 `passed`，退出码为 0。
 
-公开 GitHub/Gitee/GitLab 仓库也可作为输入，但当前沙箱网络可能拦截 TLS，此时任务会明确停在 `clone_repository` 并记录 `COMMAND_FAILED`。
+公开 GitHub/Gitee/GitLab 仓库也可作为输入。沙箱网络不可达时，任务会自动重试一次，随后失败并给出中文原因；错误码为 `REPO_UNREACHABLE` 或 `REPO_TLS_FAILED`，原始 git 输出折叠在“技术详情”，同时生成 `clone-failure.json` 说明产物。
+
+仓库体检默认就会准备测试环境，不需要额外参数。系统会在任务目录用 uv 建独立 `.venv`，按仓库的 `requires-python` 从 3.13、3.12、3.11、3.10 中挑可用解释器（缺 3.13 时现场补装），安装声明依赖，再补 pytest 并尝试把项目装成可编辑包；结果写入 `install-result.json`，安装失败时追加 `install.log`。只想做浅层检查时，显式传 `"install_deps": false`。
+
+沙箱镜像自带 Python 3.10 与 3.12。仓库要求 3.13 时，系统会先用 `uv python install` 补装（默认走 npmmirror，通常三秒内完成），装上后按严格版本运行，报告多一行“解释器准备：按仓库要求现场安装”。补装失败才会降级：报告多一行“版本说明”和 `version_relaxed: true`；传 `"allow_version_mismatch": false` 可改为直接给出“版本不满足”，不执行安装。安装失败、缺依赖、缺 pytest 都记为 `test_status=error`，不会误报成“测试未通过”；沙箱既没有 pytest 也没有标准库用例时标记为 `not_run`。
 
 ## 10. 网页验收人工测试
 
@@ -286,3 +290,8 @@ node --check frontend/create_task.js
 | M17 | 批量清理 | 勾选混合状态任务后删除 | 活动任务跳过，终态任务删除 |  |  |
 | M18 | 文本与图片预览 | 打开 `article.md` 和 `screenshot.png` | 弹窗显示正文/截图，可下载 |  |  |
 | M19 | 结构化日志 | 查看 `logs/boxpilot.jsonl` | 每行合法 JSON，含 task_id 与 event |  |  |
+| M20 | 仓库不可达 | 断网或提交不可达仓库地址 | 自动重试一次，中文原因、技术详情和 `clone-failure.json` |  |  |
+| M21 | 步骤超时 | 把 `STEP_TIMEOUT_SECONDS` 调到 5 后提交耗时任务 | 任务落为 `TIMEOUT`，步骤错误码 `STEP_TIMEOUT`，可继续创建新任务 |  |  |
+| M22 | 缺 pytest | 在无 pytest 的沙箱提交 pytest 风格仓库 | 自动改用 unittest；缺依赖时报“依赖未安装”，不显示“测试未通过” |  |  |
+| M23 | 默认安装依赖 | 提交仓库体检，不带任何安装参数 | 成功时只多 `install-result.json`；失败明确报“依赖安装失败”并保留 `install.log` |  |  |
+| M24 | 按仓库补装解释器 | 提交要求 Python 3.13 的仓库，保持默认参数 | 自动装好 3.13，报告显示“解释器准备：按仓库要求现场安装”，测试用 3.13 运行 |  |  |

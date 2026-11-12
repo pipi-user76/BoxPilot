@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from backend.config import settings
 from backend.sandbox_client import SandboxAdapter
@@ -53,7 +54,9 @@ class WebAcceptTemplate:
         context.state.update(
             actual_title=str(data.get("title") or "").strip(),
             http_status=data.get("status"),
-            load_time_ms=data.get("load_time_ms"),
+            load_time_ms=round(data["load_time_ms"], 1)
+            if isinstance(data.get("load_time_ms"), (int, float))
+            else None,
         )
         return StepOutcome(output=f"页面已打开，实际标题：{context.state['actual_title'] or '未获取到标题'}")
 
@@ -85,7 +88,9 @@ class WebAcceptTemplate:
             "passed": passed,
             "http_status": context.state["http_status"],
             "load_time_ms": context.state["load_time_ms"],
+            "screenshot_bytes": context.state["screenshot_spec"].size_bytes,
             "failure_reason": None if passed else "页面标题与预期不一致",
+            "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
         report_spec = context.artifact_store.write_text(
             context.task_id,
@@ -102,5 +107,6 @@ class WebAcceptTemplate:
                 "expected_title": context.state["expected_title"],
                 "actual_title": context.state["actual_title"],
                 "http_status": context.state["http_status"],
+                "screenshot_bytes": context.state["screenshot_spec"].size_bytes,
             },
         )

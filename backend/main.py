@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Iterable
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
@@ -29,6 +29,12 @@ from backend.templates.mock import MockTemplate
 from backend.templates.repo_check import RepoCheckTemplate
 from backend.templates.web_accept import WebAcceptTemplate
 from backend.templates.web_collect import WebDigestTemplate
+
+
+class UTF8JSONResponse(JSONResponse):
+    """显式声明 UTF-8，避免旧客户端按单字节编码解析中文错误信息。"""
+
+    media_type = "application/json; charset=utf-8"
 
 
 def create_app(
@@ -70,6 +76,7 @@ def create_app(
         description="BoxPilot task execution workbench",
         version=settings.PROJECT_VERSION,
         lifespan=lifespan,
+        default_response_class=UTF8JSONResponse,
     )
     app.include_router(tasks_router)
     app.include_router(csv_router)
@@ -77,6 +84,14 @@ def create_app(
     frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
     if frontend_dir.is_dir():
         app.mount("/ui", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+
+    @app.middleware("http")
+    async def disable_ui_cache(request: Request, call_next):
+        # 页面和脚本改动后必须立刻生效，否则用户会看到旧表单、提交出缺参数的任务。
+        response = await call_next(request)
+        if request.url.path.startswith("/ui/"):
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
 
     @app.get("/")
     def read_root() -> RedirectResponse:

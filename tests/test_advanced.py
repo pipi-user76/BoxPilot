@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -86,6 +87,19 @@ class FailingTemplate:
         raise StepExecutionError("DEMO_FAILURE", "演示失败")
 
 
+class HangingTemplate:
+    """步骤故意卡住，用于验证调度器的超时兜底。"""
+
+    name = "MOCK"
+
+    def __init__(self) -> None:
+        self.steps = (StepDefinition("卡住步骤", self._hang, timeout_seconds=1),)
+
+    def _hang(self, context):
+        time.sleep(5)
+        return StepOutcomeStub("迟到一步")
+
+
 class StepOutcomeStub:
     """轻量步骤结果，字段与 StepOutcome 保持一致。"""
 
@@ -142,6 +156,18 @@ class AdvancedApiTests(unittest.TestCase):
         self.assertEqual(final["status"], "CANCELLED")
         self.assertEqual(final["result"]["completed_steps"], ["第一步"])
         self.assertEqual(template.executed, ["第一步"])
+
+    def test_hanging_step_times_out_instead_of_running_forever(self) -> None:
+        """步骤卡死时按超时收尾，任务不会永远停在运行中。"""
+        self.make_client([(TaskType.MOCK, HangingTemplate())])
+
+        created = self.client.post("/tasks", json={"task_type": "MOCK", "params": {}}).json()
+        task = self.client.get(f"/tasks/{created['id']}").json()
+
+        self.assertEqual(task["status"], "TIMEOUT")
+        self.assertEqual(task["error_code"], "STEP_TIMEOUT")
+        self.assertEqual(task["steps"][0]["error_code"], "STEP_TIMEOUT")
+        self.assertIn("已停止等待", task["error_message"])
 
     def test_cancel_finished_task_returns_conflict(self) -> None:
         """已结束任务不能再取消，返回 409。"""

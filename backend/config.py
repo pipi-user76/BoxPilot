@@ -19,8 +19,22 @@ class Settings(BaseSettings):
     MAX_ARTIFACT_BYTES: int = 20 * 1024 * 1024
     MAX_CSV_UPLOAD_BYTES: int = 5 * 1024 * 1024
     TRUSTED_GIT_HOSTS: str = "github.com,gitee.com,gitlab.com"
+    REPO_CLONE_ATTEMPTS: int = 2
+    REPO_CLONE_TIMEOUT_SECONDS: int = 60
     REPO_TEST_TIMEOUT_SECONDS: int = 180
+    REPO_INSTALL_TIMEOUT_SECONDS: int = 240
+    REPO_PYTHON_INSTALL_TIMEOUT_SECONDS: int = 180
+    # uv 的两类源要分开配置：UV_INDEX_URL 管 Python 包，UV_PYTHON_INSTALL_MIRROR 管解释器下载。
+    # 默认走 npmmirror，GitHub 直连过慢时也能在几秒内装好 3.13；需要官方源时显式设为空字符串。
+    # 默认用阿里云镜像，避免沙箱直连 PyPI 超时；需要官方源时显式设为空字符串。
+    UV_INDEX_URL: str = "https://mirrors.aliyun.com/pypi/simple/"
+    UV_PYTHON_INSTALL_MIRROR: str = (
+        "https://registry.npmmirror.com/-/binary/python-build-standalone"
+    )
     WEB_ACCEPTANCE_TIMEOUT_SECONDS: int = 60
+    # 步骤级与任务级兜底超时：即使沙箱请求卡死，调度器也不会无限期停在 RUNNING。
+    STEP_TIMEOUT_SECONDS: int = 240
+    TASK_TIMEOUT_SECONDS: int = 900
     ENABLE_DEMO_TASKS: bool = True
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Path = Path("logs/boxpilot.jsonl")

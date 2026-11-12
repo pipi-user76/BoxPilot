@@ -27,9 +27,29 @@ class CsvSandbox:
             "columns": 2,
             "column_names": ["value", "group"],
             "duplicate_rows": 0,
+            "missing_cells": 0,
+            "completeness": 100.0,
             "column_summary": {
-                "value": {"type": "integer", "count": 3, "missing": 0, "mean": 2.0},
-                "group": {"type": "string", "count": 3, "missing": 0, "unique": 2},
+                "value": {
+                    "type": "integer",
+                    "count": 3,
+                    "missing": 0,
+                    "unique": 3,
+                    "examples": ["1", "2", "3"],
+                    "min": 1,
+                    "max": 3,
+                    "mean": 2.0,
+                    "median": 2,
+                    "stdev": 1.0,
+                },
+                "group": {
+                    "type": "string",
+                    "count": 3,
+                    "missing": 0,
+                    "unique": 2,
+                    "examples": ["a", "b", "a"],
+                    "top_values": [{"value": "a", "count": 2}, {"value": "b", "count": 1}],
+                },
             },
         }
 
@@ -64,7 +84,7 @@ class CsvApiTests(unittest.TestCase):
         self.client = context.__enter__()
 
     def test_csv_upload_runs_template_and_downloads_artifacts(self) -> None:
-        """正常 CSV 应创建任务并生成 summary.json、report.txt。"""
+        """正常 CSV 应创建任务并生成 summary.json、report.md。"""
         response = self.client.post(
             "/tasks/csv",
             files={"file": ("sample.csv", b"value,group\n1,a\n2,b\n3,a\n", "text/csv")},
@@ -72,14 +92,20 @@ class CsvApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         task = self.client.get(f"/tasks/{response.json()['id']}").json()
         self.assertEqual(task["status"], "SUCCESS")
-        self.assertEqual([item["filename"] for item in task["artifacts"]], ["summary.json", "report.txt"])
+        self.assertEqual([item["filename"] for item in task["artifacts"]], ["summary.json", "report.md"])
 
         summary_artifact = next(item for item in task["artifacts"] if item["filename"] == "summary.json")
         summary = self.client.get(f"/artifacts/{summary_artifact['id']}/download").json()
         self.assertEqual(summary["rows"], 3)
         self.assertEqual(summary["columns"], 2)
+        self.assertEqual(summary["missing_cells"], 0)
+        self.assertEqual(summary["completeness"], 100.0)
+        report_artifact = next(item for item in task["artifacts"] if item["filename"] == "report.md")
+        report = self.client.get(f"/artifacts/{report_artifact['id']}/download")
+        self.assertIn("CSV 分析报告", report.text)
         self.assertEqual(task["result"]["summary"]["kind"], "csv_analysis")
         self.assertEqual(task["result"]["summary"]["rows"], 3)
+        self.assertEqual(task["result"]["summary"]["completeness"], 100.0)
         self.assertEqual(task["steps"][0]["name"], "校验 CSV 文件")
 
     def test_csv_upload_rejects_non_csv_file(self) -> None:

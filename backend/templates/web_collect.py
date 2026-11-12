@@ -1,18 +1,27 @@
-"""文件职责：网页资料整理模板，提取去噪正文、纯文本和整页截图。
+"""文件职责：网页资料整理模板，提取去噪正文、整页截图和内容统计。
 
 固定步骤为 URL 校验、打开页面、正文提取（Readability 去噪，失败时退回可见文本）、
-整页截图和写入元数据报告。正文为空会使任务失败，避免生成没有有效内容的伪成功产物。
+整页截图和写入元数据报告。只保留 article.md 一份正文，避免同时输出 Markdown 与纯文本。
+正文为空会使任务失败，避免生成没有有效内容的伪成功产物。
 """
 
 from __future__ import annotations
 
 import json
+import re
+from datetime import datetime, timezone
 
 from backend.config import settings
 from backend.sandbox_client import SandboxAdapter
 from backend.storage import ArtifactSpec
 from backend.templates.base import StepDefinition, StepExecutionError, StepOutcome, TaskContext
 from backend.validation import ValidationFailure, validate_http_url
+
+_CJK = re.compile(r"[\u4e00-\u9fff]")
+_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9'-]*")
+_HEADING = re.compile(r"(?m)^#{1,6}\s")
+_LINK = re.compile(r"\[[^\]]+\]\([^)]+\)")
+_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
 
 
 class WebDigestTemplate:
@@ -48,10 +57,11 @@ class WebDigestTemplate:
             error = result["error"]
             raise StepExecutionError(error["code"], error["message"])
         data = result["data"] or {}
+        load_time = data.get("load_time_ms")
         context.state.update(
             title=str(data.get("title") or "").strip(),
             http_status=data.get("status"),
-            load_time_ms=data.get("load_time_ms"),
+            load_time_ms=round(load_time, 1) if isinstance(load_time, (int, float)) else None,
         )
         return StepOutcome(output=f"页面已打开，标题：{context.state['title'] or '未获取到标题'}")
 
@@ -81,28 +91,14 @@ class WebDigestTemplate:
 
         article_spec = context.artifact_store.write_text(context.task_id, "article.md", markdown + "\n")
 
-        # 纯文本优先使用浏览器可见文本；读取失败时保留 Markdown 原文，保证产物完整。
-        text = markdown
-        text_result = self.sandbox.get_page_text()
-        if text_result["success"]:
-            candidate = str(text_result["data"].get("text") or "").strip()
-            if candidate:
-                text = candidate
-        page_spec = context.artifact_store.write_text(context.task_id, "page.txt", text + "\n")
-
-        context.state.update(
-            article=markdown,
-            page_text=text,
-            extraction=mode,
-            article_spec=article_spec,
-            page_text_spec=page_spec,
-        )
+        words = len(_CJK.findall(markdown)) + len(_WORD.findall(markdown))
+        context.state.update(article=markdown, extraction=mode, article_spec=article_spec, words=words)
         return StepOutcome(
             output=(
                 f"正文提取完成（{'Readability 去噪' if mode == 'readability' else '可见文本回退'}）："
-                f"Markdown {len(markdown)} 字符，纯文本 {len(text)} 字符"
+                f"{words} 个词"
             ),
-            artifacts=[article_spec, page_spec],
+            artifacts=[article_spec],
         )
 
     def _capture_screenshot(self, context: TaskContext) -> StepOutcome:
@@ -123,19 +119,28 @@ class WebDigestTemplate:
         return StepOutcome(output=f"整页截图已保存，大小约 {size_kb} KB", artifacts=[spec])
 
     def _write_report(self, context: TaskContext) -> StepOutcome:
-        """生成轻量元数据报告，正文仍以 article.md 和 page.txt 为准。"""
-        markdown_length = len(context.state["article"])
-        text_length = len(context.state["page_text"])
+        """生成轻量元数据报告；正文本身在 article.md，截图在 screenshot.png。"""
+        markdown = context.state["article"]
+        words = len(_CJK.findall(markdown)) + len(_WORD.findall(markdown))
+        reading_minutes = max(1, round(words / 300))
+        screenshot_bytes = context.state["screenshot_spec"].size_bytes
         report = {
             "url": context.state["url"],
             "title": context.state["title"],
             "http_status": context.state["http_status"],
             "load_time_ms": context.state["load_time_ms"],
-            "text_length": text_length,
-            "markdown_length": markdown_length,
             "extraction": context.state["extraction"],
             "full_page": context.state["full_page"],
-            "artifacts": ["article.md", "page.txt", "screenshot.png"],
+            "content": {
+                "characters": len(markdown),
+                "words": words,
+                "reading_time_minutes": reading_minutes,
+                "headings": len(_HEADING.findall(markdown)),
+                "links": len(_LINK.findall(markdown)),
+                "images": len(_IMAGE.findall(markdown)),
+            },
+            "screenshot_bytes": screenshot_bytes,
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
         spec = context.artifact_store.write_text(
             context.task_id,
@@ -143,7 +148,7 @@ class WebDigestTemplate:
             json.dumps(report, ensure_ascii=False, indent=2),
         )
         return StepOutcome(
-            output="网页资料整理完成",
+            output=f"网页资料整理完成：{words} 词，约 {reading_minutes} 分钟阅读",
             artifacts=[spec],
             result={
                 "kind": "web_digest",
@@ -151,10 +156,10 @@ class WebDigestTemplate:
                 "title": context.state["title"],
                 "url": context.state["url"],
                 "http_status": context.state["http_status"],
-                "text_length": text_length,
-                "markdown_length": markdown_length,
+                "words": words,
+                "reading_time_minutes": reading_minutes,
                 "extraction": context.state["extraction"],
                 "full_page": True,
-                "screenshot_bytes": context.state["screenshot_spec"].size_bytes,
+                "screenshot_bytes": screenshot_bytes,
             },
         )

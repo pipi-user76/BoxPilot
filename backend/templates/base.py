@@ -13,11 +13,24 @@ from backend.storage import ArtifactSpec, ArtifactStore
 
 
 class StepExecutionError(RuntimeError):
-    """模板步骤遇到可预期失败时抛出，调度器会将其落库并停止后续步骤。"""
-    def __init__(self, code: str, message: str):
+    """模板步骤遇到可预期失败时抛出，调度器会将其落库并停止后续步骤。
+
+    message 面向使用者，写清“发生了什么、可以怎么办”；detail 保存原始命令输出，
+    供排查时查看，不直接占据错误提示位置。
+    """
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        detail: str = "",
+        artifacts: tuple[ArtifactSpec, ...] = (),
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
+        self.detail = detail
+        # 失败前已经写好的产物仍然登记，让用户至少能拿到一份失败说明。
+        self.artifacts = artifacts
 
 
 @dataclass(frozen=True)
@@ -39,9 +52,10 @@ class StepOutcome:
 
 @dataclass(frozen=True)
 class StepDefinition:
-    """一个可执行步骤的名称和动作函数。"""
+    """一个可执行步骤的名称和动作函数；timeout_seconds 留空时使用全局默认值。"""
     name: str
     action: Callable[[TaskContext], StepOutcome]
+    timeout_seconds: int | None = None
 
 
 class TaskTemplate(Protocol):
