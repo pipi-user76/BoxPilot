@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     TASK_PAGE_SIZE_DEFAULT: int = 20
     TASK_PAGE_SIZE_MAX: int = 100
     PREVIEW_TEXT_LIMIT: int = 200_000
+    # 安全边界：同一任务参数在窗口内只允许创建一次；限流按来源 IP 计数，0 表示关闭。
+    DEDUPE_WINDOW_SECONDS: int = 300
+    RATE_LIMIT_PER_MINUTE: int = 20
+    URL_MAX_LENGTH: int = 2048
+    COMMAND_MAX_LENGTH: int = 8192
 
     model_config = SettingsConfigDict(
         env_file=".env",

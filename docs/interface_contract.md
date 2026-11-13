@@ -115,6 +115,10 @@ purge_tasks(statuses, older_than) -> list[str]
 
 返回 `202` 和任务记录。未注册模板返回 `422 TEMPLATE_NOT_AVAILABLE`。
 
+幂等：相同 `task_type` 与相同参数（键顺序无关）在 `DEDUPE_WINDOW_SECONDS`（默认 300 秒）内只创建一次。命中时返回原任务，并置 `deduplicated=true`；失败、超时和已取消的任务不参与去重，允许用户重跑。任务记录新增 `dedupe_key`（内部键）与 `deduplicated`（仅响应标记）两个字段。
+
+限流：`POST /tasks` 与 `POST /tasks/csv` 按来源 IP 限制为 `RATE_LIMIT_PER_MINUTE`（默认 20）次每分钟，超限返回 `429 RATE_LIMITED`，并带 `Retry-After` 秒数。
+
 ### POST /tasks/csv
 
 使用 `multipart/form-data` 接收 `file`。当前限制：
@@ -192,7 +196,9 @@ take_screenshot(save_path, full_page=False) -> dict
 {"success": false, "data": null, "error": {"code": "TIMEOUT", "message": "..."}}
 ```
 
-固定错误码：`VALIDATION_ERROR`、`SANDBOX_UNAVAILABLE`、`TIMEOUT`、`COMMAND_BLOCKED`、`COMMAND_FAILED`、`FILE_NOT_FOUND`、`ARTIFACT_EMPTY`、`INTERNAL_ERROR`、`STEP_TIMEOUT`、`TASK_TIMEOUT`，以及仓库克隆相关的 `REPO_UNREACHABLE`、`REPO_NOT_FOUND`、`REPO_AUTH_REQUIRED`、`REPO_TRANSFER_FAILED`、`REPO_TLS_FAILED`、`CLONE_FAILED`。
+固定错误码：`VALIDATION_ERROR`、`SANDBOX_UNAVAILABLE`、`TIMEOUT`、`COMMAND_BLOCKED`、`COMMAND_FAILED`、`STEP_KILLED`、`FILE_NOT_FOUND`、`ARTIFACT_EMPTY`、`INTERNAL_ERROR`、`STEP_TIMEOUT`、`TASK_TIMEOUT`、`RATE_LIMITED`，以及仓库克隆相关的 `REPO_UNREACHABLE`、`REPO_NOT_FOUND`、`REPO_AUTH_REQUIRED`、`REPO_TRANSFER_FAILED`、`REPO_TLS_FAILED`、`CLONE_FAILED`。
+
+命令失败或超时时，沙箱错误对象带 `exit_code`、`signal`、`partial_output` 和 `duration_ms`；退出码 137/143 或负数归类为 `STEP_KILLED`（进程被杀），与普通 `COMMAND_FAILED` 区分。网页任务的 URL 会先做语法校验，再解析域名并拒绝回环、内网、链路本地和云元数据地址，端口只允许 80/443。
 
 仓库克隆失败时，`error_message` 只放“发生了什么、可以怎么办”的中文说明；git 原始输出放在失败步骤的 `output` 字段，前端折叠为“技术详情”。
 

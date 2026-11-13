@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -236,6 +237,7 @@ class SandboxAdapter:
     ) -> dict[str, Any]:
         """底层命令执行；集中处理 SDK 状态、退出码、超时和输出截断。"""
         timeout = timeout_s or self.default_timeout_s
+        started = time.monotonic()
         try:
             response = self.client.shell.exec_command(
                 command=command,
@@ -253,10 +255,28 @@ class SandboxAdapter:
             status_value = getattr(status, "value", status)
             output = getattr(data, "output", None) or ""
             exit_code = getattr(data, "exit_code", None)
+            duration_ms = int((time.monotonic() - started) * 1000)
             if status_value in {"hard_timeout", "no_change_timeout", "timeout"}:
-                return self._failure("TIMEOUT", f"command timed out: {status_value}")
+                return self._failure(
+                    "TIMEOUT",
+                    f"command timed out: {status_value}",
+                    partial_output=output[-4000:],
+                    exit_code=exit_code,
+                    signal="timeout",
+                    duration_ms=duration_ms,
+                    timed_out=True,
+                )
             if check_exit and exit_code not in {None, 0}:
-                return self._failure("COMMAND_FAILED", f"command exited with code {exit_code}: {output[-1000:]}")
+                # 137/143 通常是被 kill 或超时终止；与普通失败区分，便于前端给不同建议。
+                killed = exit_code in {137, 143} or exit_code < 0
+                return self._failure(
+                    "STEP_KILLED" if killed else "COMMAND_FAILED",
+                    f"command exited with code {exit_code}: {output[-1000:]}",
+                    partial_output=output[-4000:],
+                    exit_code=exit_code,
+                    signal="killed" if killed else None,
+                    duration_ms=duration_ms,
+                )
             return {
                 "success": True,
                 "data": {"output": output, "exit_code": exit_code, "status": str(status_value)},
@@ -271,9 +291,10 @@ class SandboxAdapter:
         return any(pattern.search(command) for pattern in _BLOCKED_COMMAND_PATTERNS)
 
     @staticmethod
-    def _failure(code: str, message: str) -> dict[str, Any]:
-        """构造统一失败结果，确保前端总能拿到稳定错误码。"""
-        return {"success": False, "data": None, "error": {"code": code, "message": message}}
+    def _failure(code: str, message: str, **extra: Any) -> dict[str, Any]:
+        """构造统一失败结果；extra 用于带出超时/被杀时的退出码和部分输出。"""
+        error = {"code": code, "message": message, **extra}
+        return {"success": False, "data": None, "error": error}
 
     def _exception_failure(self, exc: Exception) -> dict[str, Any]:
         """把网络、超时、文件权限等异常归类为项目错误码。"""

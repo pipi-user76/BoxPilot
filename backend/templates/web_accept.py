@@ -13,7 +13,7 @@ from backend.config import settings
 from backend.sandbox_client import SandboxAdapter
 from backend.storage import ArtifactSpec
 from backend.templates.base import StepDefinition, StepExecutionError, StepOutcome, TaskContext
-from backend.validation import ValidationFailure, validate_http_url
+from backend.templates.url_guard import guard_url
 
 
 class WebAcceptTemplate:
@@ -33,15 +33,11 @@ class WebAcceptTemplate:
 
     def _validate_input(self, context: TaskContext) -> StepOutcome:
         """URL 和预期标题都是必填字段，并在这里完成 URL 安全校验。"""
-        url = str(context.params.get("url", "")).strip()
         expected_title = str(context.params.get("expected_title", "")).strip()
         if not expected_title:
             raise StepExecutionError("VALIDATION_ERROR", "expected_title is required")
-        try:
-            validate_http_url(url)
-        except ValidationFailure as exc:
-            raise StepExecutionError("VALIDATION_ERROR", str(exc)) from exc
-        context.state.update(url=url, expected_title=expected_title)
+        url = guard_url(context)
+        context.state["expected_title"] = expected_title
         return StepOutcome(output=f"目标地址校验通过：{url}")
 
     def _open_page(self, context: TaskContext) -> StepOutcome:

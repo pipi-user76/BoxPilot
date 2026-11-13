@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 
 from backend.config import settings
 from backend.db import TaskStore
+from backend.dedupe import build_dedupe_key
 from backend.logging_config import get_logger
 from backend.models import (
     Artifact,
@@ -91,7 +92,19 @@ def create_task(
                 "message": f"task type {payload.task_type.value} is not registered yet",
             },
         )
-    task = _store(request).create_task(payload.task_type, payload.params)
+    store = _store(request)
+    dedupe_key = build_dedupe_key(payload.task_type, payload.params)
+    existing = store.find_by_dedupe(
+        dedupe_key, utc_now() - timedelta(seconds=settings.DEDUPE_WINDOW_SECONDS)
+    )
+    if existing is not None:
+        # 命中窗口内同参数任务：直接返回原任务，并用 deduplicated 标记，避免重复执行。
+        log.info(
+            "task_deduplicated",
+            extra={"task_id": existing.id, "task_type": existing.task_type.value},
+        )
+        return existing.model_copy(update={"deduplicated": True})
+    task = store.create_task(payload.task_type, payload.params, dedupe_key=dedupe_key)
     log.info(
         "task_created",
         extra={"task_id": task.id, "task_type": task.task_type.value, "attempt": task.attempt},

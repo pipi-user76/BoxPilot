@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile, status
 
 from backend.config import settings
-from backend.models import TaskRecord, TaskStatus, TaskType
+from backend.dedupe import build_dedupe_key
+from backend.models import TaskRecord, TaskStatus, TaskType, utc_now
 from backend.storage import ArtifactStore
 from backend.scheduler import TaskRunner
 
@@ -44,9 +47,23 @@ async def create_csv_task(
     store = request.app.state.task_store
     artifact_store: ArtifactStore = request.app.state.artifact_store
     runner: TaskRunner = request.app.state.task_runner
+
+    # CSV 的内容不在参数里，用文件摘要参与幂等键，避免同名不同内容被误判为重复。
+    digest = hashlib.sha256(content).hexdigest()
+    dedupe_key = build_dedupe_key(
+        TaskType.CSV_ANALYSIS,
+        {"source_filename": original_name, "sha256": digest},
+    )
+    existing = store.find_by_dedupe(
+        dedupe_key, utc_now() - timedelta(seconds=settings.DEDUPE_WINDOW_SECONDS)
+    )
+    if existing is not None:
+        return existing.model_copy(update={"deduplicated": True})
+
     task = store.create_task(
         TaskType.CSV_ANALYSIS,
         {"source_filename": original_name, "csv_filename": "input.csv"},
+        dedupe_key=dedupe_key,
     )
     try:
         artifact_store.write_bytes(task.id, "input.csv", content, "text/csv")

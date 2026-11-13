@@ -90,6 +90,9 @@ class TaskRecord(BaseModel):
     error_message: str | None = None
     attempt: int = 1
     retry_of: str | None = None
+    # 幂等键在窗口内唯一；deduplicated 只在响应中标记，表示命中已有任务而未新建。
+    dedupe_key: str | None = None
+    deduplicated: bool = False
     created_at: datetime = Field(default_factory=utc_now)
     started_at: datetime | None = None
     finished_at: datetime | None = None

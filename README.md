@@ -20,7 +20,7 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 
 ## 当前进度
 
-更新时间：2026-11-07。当前状态为“四个模板可运行，具备取消、重试、结构化日志、搜索分页、批量清理和产物预览”。
+更新时间：2026-11-12。当前状态为“四个模板可运行，仓库体检默认准备 uv 测试环境并按需补装 Python，产物已按用途收敛”。
 
 | 模块 | 状态 | 当前实现 |
 |---|---|---|
@@ -31,20 +31,33 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 | 网页资料整理 `WEB_DIGEST` | 已完成 | `article.md` 去噪正文、整页 `screenshot.png`、`web-digest.json`（词数、阅读时长、标题数、链接数、图片数） |
 | CSV 分析 `CSV_ANALYSIS` | 已完成 | multipart 上传、标准库分析、`summary.json`（列类型、缺失、唯一值、高频值）、中文 `report.md` |
 | 仓库体检 `REPO_CHECK` | 已完成 | 白名单仓库、固定测试命令、离线 `demo://python`、失败重试、中文错误说明与失败报告；默认用 uv 在任务目录建独立虚拟环境，按 `requires-python` 选或现场补装 3.13/3.12/3.11/3.10，装完依赖再补 pytest 并尽量把项目装成可编辑包 |
-| 网页验收 `WEB_ACCEPTANCE` | 已完成 | 标题比对、截图、`acceptance.json` |
+| 网页验收 `WEB_ACCEPTANCE` | 已完成 | 标题比对、整页截图、`acceptance.json`（预期/实际标题、状态码、加载耗时、截图大小、检查时间） |
 | Web 工作台 | 已完成进阶版 | 服务端搜索与分页、批量清理、取消/重试、任务结论、文本与图片预览 |
 | SQLite 持久化 | 待接入 | 当前仍使用内存 `TaskStore`，重启后任务记录丢失 |
-| 10 至 15 个系统样例 | 进行中 | 已有 44 项自动化测试，尚需形成统一验收表和统计报告 |
+| 10 至 15 个系统样例 | 进行中 | 已有 66 项自动化测试，尚需形成统一验收表和统计报告 |
 
 当前已注册 `MOCK`、`CSV_ANALYSIS`、`WEB_DIGEST`、`REPO_CHECK` 和 `WEB_ACCEPTANCE`。未知任务类型会返回明确校验错误，不会生成伪成功任务。
 
 最近验证结果：
 
-- 44 项 Python 测试中 43 项执行通过，1 项真实沙箱集成测试默认跳过。
-- 真实 `WEB_DIGEST` 使用沙箱 Readability 去噪，产物为 4 个文件，整页截图约 75 KB。
+- 66 项 Python 测试中 65 项执行通过，1 项真实沙箱集成测试默认跳过。
+- 真实 `WEB_DIGEST` 使用沙箱 Readability 去噪，产物为 3 个文件（正文、整页截图、报告），正文 130 词，整页截图约 75 KB。
+- 真实仓库体检默认建 `.venv` 并现场补装 Python 3.13.6，装完依赖后跑通本项目 44 项测试（1 项跳过）。
+- 真实 CSV 分析生成 `summary.json` 与中文 `report.md`，样例完整度 91.7%。
 - 真实取消任务在步骤边界落为 `CANCELLED`，失败任务重试生成 `attempt=2` 且 `retry_of` 指向原任务。
 - 列表分页、搜索、批量清理、文本预览和图片预览均已通过浏览器联调。
 - 当前 `/health` 返回 `ok`。
+
+## 产物清单
+
+| 模板 | 产物 | 说明 |
+|---|---|---|
+| `WEB_DIGEST` | `article.md`、`screenshot.png`、`web-digest.json` | 正文只保留一份；报告含词数、预计阅读分钟、标题数、链接数、图片数、截图大小与生成时间 |
+| `CSV_ANALYSIS` | `summary.json`、`report.md` | JSON 含行列数、重复行、缺失单元格、完整度、每列类型/唯一值/示例/高频值；Markdown 为中文列概览表 |
+| `REPO_CHECK` | `check-report.md`、`check-report.json`、`test.log` | 成功时的最小集合；克隆重试过才有 `clone.log`，安装失败才有 `install.log`；`install-result.json` 只留在沙箱 |
+| `WEB_ACCEPTANCE` | `acceptance.json`、`page.png` | JSON 含预期/实际标题、是否通过、状态码、加载耗时、截图大小、检查时间 |
+
+失败任务同样会留下能解释原因的产物，例如仓库克隆失败时的 `clone-failure.json`。
 
 ## 下一步计划
 
@@ -112,7 +125,7 @@ uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-预期结果：`Ran 44 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 43 项使用替身沙箱，不需要 Docker。
+预期结果：`Ran 66 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 65 项使用替身沙箱，不需要 Docker。
 
 运行真实沙箱集成测试：
 
@@ -181,7 +194,7 @@ CSV 分析使用 `POST /tasks/csv` 的 multipart 表单上传，字段名为 `fi
 
 人工操作步骤见 [docs/manual_testing.md](docs/manual_testing.md)。
 
-安全边界、信任模型与已知缺口见 [docs/security.md](docs/security.md)。
+安全边界、信任模型与已知缺口见 [docs/security.md](docs/security.md)，命令注入、SSRF、幂等限流与超时兜底的改进方案见 [docs/security_hardening_plan.md](docs/security_hardening_plan.md)。
 
 当前阶段进展见 [docs/progress_report_2026-11-07.md](docs/progress_report_2026-11-07.md)，纯文本汇报见 [docs/progress_report_2026-11-07.txt](docs/progress_report_2026-11-07.txt)，上一阶段见 [docs/progress_report_2026-11-06.md](docs/progress_report_2026-11-06.md)。
 
@@ -233,7 +246,9 @@ docs/                接口契约与验收记录
 ## 安全边界
 
 - 沙箱端口只绑定本机回环地址。
-- Shell 命令经过危险模式检查，并限制在任务工作目录内执行。
+- Shell 命令经过危险模式检查，并限制在任务工作目录内执行；用户参数统一经 `quote_arg` 转义并拒绝控制字符。
+- 网页任务会解析域名并拒绝回环、内网、链路本地和云元数据地址，端口只允许 80/443。
+- 相同任务参数在 300 秒内只创建一次；`POST /tasks` 与 `POST /tasks/csv` 按来源 IP 限流，超限返回 429。
 - 任务 ID、文件名和相对路径均做路径逃逸校验。
 - 下载只允许访问数据库/任务记录中已登记的产物。
 - 黑名单不是完整隔离。代码体检只应运行可信公开仓库和预设测试命令。

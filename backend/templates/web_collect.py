@@ -15,7 +15,7 @@ from backend.config import settings
 from backend.sandbox_client import SandboxAdapter
 from backend.storage import ArtifactSpec
 from backend.templates.base import StepDefinition, StepExecutionError, StepOutcome, TaskContext
-from backend.validation import ValidationFailure, validate_http_url
+from backend.templates.url_guard import validate_public_url_step
 
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 _WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9'-]*")
@@ -33,7 +33,7 @@ class WebDigestTemplate:
         self.sandbox = sandbox
         self.timeout_s = timeout_s or settings.WEB_ACCEPTANCE_TIMEOUT_SECONDS
         self.steps = (
-            StepDefinition("校验网页地址", self._validate_url),
+            StepDefinition("校验网页地址", validate_public_url_step),
             StepDefinition("打开网页", self._open_page),
             StepDefinition("提取正文并去噪", self._extract_article),
             StepDefinition("截取整页截图", self._capture_screenshot),
@@ -41,14 +41,8 @@ class WebDigestTemplate:
         )
 
     def _validate_url(self, context: TaskContext) -> StepOutcome:
-        """URL 必须是合法的 HTTP/HTTPS 绝对地址。"""
-        url = str(context.params.get("url", "")).strip()
-        try:
-            validate_http_url(url)
-        except ValidationFailure as exc:
-            raise StepExecutionError("VALIDATION_ERROR", str(exc)) from exc
-        context.state["url"] = url
-        return StepOutcome(output=f"网页地址校验通过：{url}")
+        """保留旧方法名，实际委托给共用的公网地址校验。"""
+        return validate_public_url_step(context)
 
     def _open_page(self, context: TaskContext) -> StepOutcome:
         """打开页面并记录标题、HTTP 状态和加载耗时。"""

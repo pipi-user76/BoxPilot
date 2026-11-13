@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import time
 from typing import Iterable
 
 from fastapi import FastAPI, Request
@@ -92,6 +93,36 @@ def create_app(
         if request.url.path.startswith("/ui/"):
             response.headers["Cache-Control"] = "no-store, must-revalidate"
         return response
+
+    # 仅限制“创建任务”的入口；列表轮询和健康检查不占用额度。
+    _rate_buckets: dict[str, tuple[float, int]] = {}
+
+    @app.middleware("http")
+    async def rate_limit(request: Request, call_next):
+        if settings.RATE_LIMIT_PER_MINUTE > 0 and request.method == "POST" and request.url.path in {
+            "/tasks",
+            "/tasks/csv",
+        }:
+            client = request.client.host if request.client else "unknown"
+            now = time.monotonic()
+            window_start, count = _rate_buckets.get(client, (now, 0))
+            if now - window_start >= 60:
+                window_start, count = now, 0
+            count += 1
+            _rate_buckets[client] = (window_start, count)
+            if count > settings.RATE_LIMIT_PER_MINUTE:
+                retry_after = max(1, int(60 - (now - window_start)))
+                return UTF8JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": {
+                            "code": "RATE_LIMITED",
+                            "message": "请求过于频繁，请稍后再试",
+                        }
+                    },
+                    headers={"Retry-After": str(retry_after)},
+                )
+        return await call_next(request)
 
     @app.get("/")
     def read_root() -> RedirectResponse:

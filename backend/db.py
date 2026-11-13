@@ -42,7 +42,10 @@ class TaskStore(Protocol):
         *,
         attempt: int = 1,
         retry_of: str | None = None,
+        dedupe_key: str | None = None,
     ) -> TaskRecord: ...
+
+    def find_by_dedupe(self, dedupe_key: str, since: datetime) -> TaskRecord | None: ...
 
     def get_task(self, task_id: str) -> TaskRecord | None: ...
 
@@ -105,12 +108,36 @@ class InMemoryTaskStore:
         *,
         attempt: int = 1,
         retry_of: str | None = None,
+        dedupe_key: str | None = None,
     ) -> TaskRecord:
         # 重试任务使用新的任务 ID，并通过 attempt/retry_of 保留来源关系。
-        task = TaskRecord(task_type=task_type, params=params, attempt=attempt, retry_of=retry_of)
+        task = TaskRecord(
+            task_type=task_type,
+            params=params,
+            attempt=attempt,
+            retry_of=retry_of,
+            dedupe_key=dedupe_key,
+        )
         with self._lock:
             self._tasks[task.id] = task
         return task.model_copy(deep=True)
+
+    def find_by_dedupe(self, dedupe_key: str, since: datetime) -> TaskRecord | None:
+        """返回窗口内同键的最近任务；失败任务不参与去重，允许用户重跑。"""
+        if not dedupe_key:
+            return None
+        with self._lock:
+            matches = [
+                task
+                for task in self._tasks.values()
+                if task.dedupe_key == dedupe_key
+                and task.created_at >= since
+                and task.status not in {TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.TIMEOUT}
+            ]
+        if not matches:
+            return None
+        latest = max(matches, key=lambda item: item.created_at)
+        return latest.model_copy(deep=True)
 
     def get_task(self, task_id: str) -> TaskRecord | None:
         with self._lock:

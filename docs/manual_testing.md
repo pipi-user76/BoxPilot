@@ -2,6 +2,8 @@
 
 本文用于开发人员在不依赖自动化测试的情况下，检查沙箱、后端、前端和错误处理是否正常。
 
+最后更新：2026-11-13，对应 66 项自动化测试与安全边界加固后的版本。
+
 ## 1. 测试前准备
 
 1. 启动 Docker Desktop，等待 Docker 服务进入运行状态。
@@ -120,8 +122,10 @@ C,,y
 
 预期任务状态为 `SUCCESS`，生成：
 
-- `summary.json`：4 行、3 列、1 个重复行、`score` 列 1 个缺失值、完整度 91.7%，并带每列的类型、唯一值、示例和高频值。
-- `report.md`：中文分析报告，含列概览表格。
+- `summary.json`：4 行、3 列、1 个重复行、`score` 列 1 个缺失值、完整度 91.7%，并带每列的类型、唯一值、前三个示例和高频值。
+- `report.md`：中文分析报告，含列概览表格（列名、类型、非空、缺失、唯一值、摘要）。数值列显示最小/最大/均值，文本列显示示例和高频值。
+
+打开预览，确认表格列对齐、均值保留两位小数，且不再出现 `page.txt`、`report.txt` 这类旧产物。
 
 空文件、非 `.csv` 文件或超过 5 MB 的文件应被明确拒绝。
 
@@ -186,7 +190,7 @@ C,,y
 
 公开 GitHub/Gitee/GitLab 仓库也可作为输入。沙箱网络不可达时，任务会自动重试一次，随后失败并给出中文原因；错误码为 `REPO_UNREACHABLE` 或 `REPO_TLS_FAILED`，原始 git 输出折叠在“技术详情”，同时生成 `clone-failure.json` 说明产物。
 
-仓库体检默认就会准备测试环境，不需要额外参数。系统会在任务目录用 uv 建独立 `.venv`，按仓库的 `requires-python` 从 3.13、3.12、3.11、3.10 中挑可用解释器（缺 3.13 时现场补装），安装声明依赖，再补 pytest 并尝试把项目装成可编辑包；结果写入 `install-result.json`，安装失败时追加 `install.log`。只想做浅层检查时，显式传 `"install_deps": false`。
+仓库体检默认就会准备测试环境，不需要额外参数。系统会在任务目录用 uv 建独立 `.venv`，按仓库的 `requires-python` 从 3.13、3.12、3.11、3.10 中挑可用解释器（缺 3.13 时现场补装），安装声明依赖，再补 pytest 并尝试把项目装成可编辑包；结果写入沙箱内的 `install-result.json`，安装失败时才追加 `install.log`。只想做浅层检查时，显式传 `"install_deps": false`。
 
 沙箱镜像自带 Python 3.10 与 3.12。仓库要求 3.13 时，系统会先用 `uv python install` 补装（默认走 npmmirror，通常三秒内完成），装上后按严格版本运行，报告多一行“解释器准备：按仓库要求现场安装”。补装失败才会降级：报告多一行“版本说明”和 `version_relaxed: true`；传 `"allow_version_mismatch": false` 可改为直接给出“版本不满足”，不执行安装。安装失败、缺依赖、缺 pytest 都记为 `test_status=error`，不会误报成“测试未通过”；沙箱既没有 pytest 也没有标准库用例时标记为 `not_run`。
 
@@ -204,7 +208,7 @@ C,,y
 }
 ```
 
-预期任务状态为 `SUCCESS`，生成 `acceptance.json` 和 `page.png`，报告中 `passed` 为 `true`。
+预期任务状态为 `SUCCESS`，生成 `acceptance.json` 和 `page.png`。`acceptance.json` 含预期标题、实际标题、`passed`、HTTP 状态、加载耗时、截图大小、检查时间；报告中 `passed` 应为 `true`。
 
 将 `expected_title` 改为一个不匹配的值后再次提交：任务仍应为 `SUCCESS`，但报告中的 `passed` 应为 `false`。如果页面无法访问，任务状态才应为 `FAILED`。
 
@@ -253,6 +257,8 @@ C,,y
 ./.venv/Scripts/python.exe -m unittest discover -s tests -v
 ```
 
+预期 `Ran 66 tests ... OK (skipped=1)`。真实沙箱用例默认跳过，其余 65 项使用替身沙箱。
+
 真实沙箱集成测试：
 
 ```powershell
@@ -280,9 +286,9 @@ node --check frontend/create_task.js
 | M07 | CSV 正常上传 | 上传 4 行样例 CSV | 任务成功并生成 2 个产物 |  |  |
 | M08 | 危险命令 | 执行拦截测试 | 返回 `COMMAND_BLOCKED` |  |  |
 | M09 | 窄屏页面 | 800 px 宽度 | 无横向溢出 |  |  |
-| M10 | 离线仓库体检 | 提交 `demo://python` | 报告 passed，生成 2 个产物 |  |  |
+| M10 | 离线仓库体检 | 提交 `demo://python` | 报告 passed，生成报告、JSON 和测试日志 3 个产物 |  |  |
 | M11 | 网页标题不匹配 | 提交错误预期标题 | 任务成功，报告 passed=false |  |  |
-| M12 | 网页资料整理 | 提交本地任务页面 URL | 生成文本、截图和 JSON 报告 |  |  |
+| M12 | 网页资料整理 | 提交本地任务页面 URL | 生成 `article.md`、整页截图和 JSON 报告 3 个产物 |  |  |
 | M13 | CSV 空文件 | 上传空 CSV | 返回明确校验错误 |  |  |
 | M14 | 运行中取消 | 执行期间点击取消 | 步骤边界落为 `CANCELLED` |  |  |
 | M15 | 失败重试 | 失败任务点击重试 | 新任务 `attempt=2`，`retry_of` 正确 |  |  |
@@ -293,5 +299,9 @@ node --check frontend/create_task.js
 | M20 | 仓库不可达 | 断网或提交不可达仓库地址 | 自动重试一次，中文原因、技术详情和 `clone-failure.json` |  |  |
 | M21 | 步骤超时 | 把 `STEP_TIMEOUT_SECONDS` 调到 5 后提交耗时任务 | 任务落为 `TIMEOUT`，步骤错误码 `STEP_TIMEOUT`，可继续创建新任务 |  |  |
 | M22 | 缺 pytest | 在无 pytest 的沙箱提交 pytest 风格仓库 | 自动改用 unittest；缺依赖时报“依赖未安装”，不显示“测试未通过” |  |  |
-| M23 | 默认安装依赖 | 提交仓库体检，不带任何安装参数 | 成功时只多 `install-result.json`；失败明确报“依赖安装失败”并保留 `install.log` |  |  |
+| M23 | 默认安装依赖 | 提交仓库体检，不带任何安装参数 | 成功时产物只有报告与测试日志；失败明确报“依赖安装失败”并保留 `install.log` |  |  |
 | M24 | 按仓库补装解释器 | 提交要求 Python 3.13 的仓库，保持默认参数 | 自动装好 3.13，报告显示“解释器准备：按仓库要求现场安装”，测试用 3.13 运行 |  |  |
+| M25 | 产物字段检查 | 依次跑四个模板并打开报告 | 网页整理有词数与阅读时长，CSV 有完整度与高频值，仓库报告含实际 Python 版本，验收报告含截图大小 |  |  |
+| M26 | 重复提交 | 用同一参数连续提交两次 MOCK 或网页任务 | 第二次返回同一任务 ID，`deduplicated` 为 `true`，不新增任务 |  |  |
+| M27 | 内网地址 | 提交 `http://127.0.0.1:8080/` 或 `http://host.docker.internal/` | 第一步校验失败，任务 `FAILED`、错误码 `VALIDATION_ERROR`，提示改用公网地址 |  |  |
+| M28 | 提交限流 | 把 `RATE_LIMIT_PER_MINUTE` 调到 2，连续提交三次 | 前两次 202，第三次 429，错误码 `RATE_LIMITED`，带 `Retry-After` |  |  |
