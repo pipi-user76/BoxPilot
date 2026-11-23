@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     SANDBOX_WORK_ROOT: str = "/home/gem/boxpilot"
     SANDBOX_TIMEOUT_SECONDS: int = 120
     SANDBOX_HEALTH_TIMEOUT_SECONDS: int = 5
+    DATABASE_PATH: Path = Path("data/boxpilot.db")
     ARTIFACT_ROOT: Path = Path("artifacts")
     MAX_ARTIFACT_BYTES: int = 20 * 1024 * 1024
     MAX_CSV_UPLOAD_BYTES: int = 5 * 1024 * 1024

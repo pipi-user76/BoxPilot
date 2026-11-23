@@ -8,7 +8,7 @@ htmlcov/
 .env
 .idea/
 .vscode/
-data/boxpilot.db
+data/boxpilot.db*
 data/artifacts/
 artifacts/*
 !artifacts/.gitkeep

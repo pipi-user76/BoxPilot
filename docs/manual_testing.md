@@ -2,21 +2,28 @@
 
 本文用于开发人员在不依赖自动化测试的情况下，检查沙箱、后端、前端和错误处理是否正常。
 
-最后更新：2026-11-13，对应 66 项自动化测试与安全边界加固后的版本。
+最后更新：2026-11-23，对应 77 项自动化测试与批量订阅、规范命名版本。
 
 ## 1. 测试前准备
 
 1. 启动 Docker Desktop，等待 Docker 服务进入运行状态。
 2. 在项目根目录运行 `.\start_sandbox.bat`，确认 AIO Sandbox 已启动。
-3. 启动后端：
+3. 首次运行时初始化数据库（后端启动时也会自动建表，这一步用于提前确认路径可写）：
+
+```powershell
+./.venv/Scripts/python.exe -m scripts.init_db
+```
+
+预期输出数据库路径，默认是 `data/boxpilot.db`。可用环境变量 `DATABASE_PATH` 换成其他位置。
+4. 启动后端（SQLite 只支持单进程单 Worker，不要加 `--workers`）：
 
 ```powershell
 ./.venv/Scripts/python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-4. 打开 `http://127.0.0.1:8000/health`，应看到 `status` 为 `ok`，且 `sandbox.success` 为 `true`。
-5. 打开 `http://127.0.0.1:8000/docs`，确认 Swagger 能正常加载。
-6. 确认项目根目录出现 `logs/boxpilot.jsonl`；后续每个任务都应向其中追加 JSON 行。
+5. 打开 `http://127.0.0.1:8000/health`，应看到 `status` 为 `ok`、`store` 为 `sqlite`，且 `sandbox.success` 为 `true`。
+6. 打开 `http://127.0.0.1:8000/docs`，确认 Swagger 能正常加载。
+7. 确认项目根目录出现 `logs/boxpilot.jsonl`；后续每个任务都应向其中追加 JSON 行。
 
 ## 2. 先跑真实沙箱冒烟测试
 
@@ -85,6 +92,17 @@ BoxPilot scheduler smoke test completed successfully.
 
 四个正式模板均已注册。提交时应根据字段填写有效输入，错误输入会返回结构化校验信息。
 
+批量订阅：
+
+- 选“网页资料整理”或“代码仓库体检”，在“批量地址”里每行填一个地址，可填批次名称。
+- 提交后跳到任务列表并只显示该批次，标题为“类型 · 目标”，右侧带批次标签。
+- 打开任一任务，详情显示“批次：…”和“重跑本批”按钮；点击后按原地址重建一批。
+
+下载命名：
+
+- 详情点“下载全部”，得到 `类型_目标_时间_短ID.zip`，包内文件名带同一前缀。
+- 勾选多个任务点“下载所选”，批量包按每个任务的规范名分目录。
+
 ## 6. 网页资料整理人工测试
 
 在 Swagger 调用 `POST /tasks`：
@@ -92,19 +110,23 @@ BoxPilot scheduler smoke test completed successfully.
 ```json
 {
   "task_type": "WEB_DIGEST",
-  "params": {"url": "http://host.docker.internal:8000/ui/task_list.html"}
+  "params": {"url": "books.toscrape.com"}
 }
 ```
 
-预期任务状态为 `SUCCESS`，生成：
+列表页（如 `https://books.toscrape.com`）应进入结构化模式，预期任务状态为 `SUCCESS`，生成：
 
-- `article.md`：Readability 去噪后的正文，保留 Markdown 链接。
+- `article.md`：条目表，含序号、标题（可点击）、价格、库存、评分。
+- `items.json`：结构化数组，字段为 `title`、`price`、`stock`、`rating`、`link`、`image`。
+- `items.csv`：与 JSON 相同的字段，UTF-8 编码，可直接用 Excel 打开。
 - `screenshot.png`：整页截图。
-- `web-digest.json`：URL、标题、HTTP 状态、提取方式，以及 `content` 里的字符数、词数、预计阅读分钟、标题数、链接数和图片数。
+- `web-digest.json`：`structured`（条目数、页面选择器、字段）与 `crawler`（引擎、抓取时间、最终地址、状态码、加载耗时）。
 
-详情页的“任务结论”区应显示 `正文提取：Readability 去噪`、正文词数、预计阅读时长、HTTP 状态和截图大小。
+普通文章页（如 `https://example.com`）没有重复条目，退回去噪正文模式，只生成 `article.md`、`screenshot.png`、`web-digest.json`。
 
-如果页面无法打开或页面文本为空，任务应失败，不生成伪成功任务。
+详情页的“任务结论”区应显示提取方式、正文词数、预计阅读时长、HTTP 状态和截图大小；列表页还会显示“识别条目 N 条”。
+
+如果页面无法打开、正文为空，或只剩图片链接，任务应失败，不生成伪成功任务。
 
 ## 7. CSV 数据分析人工测试
 
@@ -126,6 +148,8 @@ C,,y
 - `report.md`：中文分析报告，含列概览表格（列名、类型、非空、缺失、唯一值、摘要）。数值列显示最小/最大/均值，文本列显示示例和高频值。
 
 打开预览，确认表格列对齐、均值保留两位小数，且不再出现 `page.txt`、`report.txt` 这类旧产物。
+
+需要更接近真实数据时，可上传 `samples/normal.csv`（99 行商品明细，含 3 个重复行、10 个缺失单元格），预期完整度 99.1%。
 
 空文件、非 `.csv` 文件或超过 5 MB 的文件应被明确拒绝。
 
@@ -234,8 +258,10 @@ C,,y
 
 - 搜索框输入任务 ID 前缀、类型关键字或错误码，300 ms 后列表刷新，右侧统计数字保持不变。
 - 状态筛选选择“已取消”，只显示 `CANCELLED` 任务；切换“每页 10/20/50”，页码与总数同步更新。
-- 勾选若干任务后点击“删除选中”，活动任务会被跳过，提示中显示删除数与跳过数。
+- 未选中任务时，“下载所选”“批量删除”为禁用状态；勾选“全选本页”后，本页全部任务被选中，按钮变为可用，再次取消则恢复禁用。
+- 勾选若干任务后点击“批量删除”，活动任务会被跳过，提示中显示删除数与跳过数。
 - 点击“清理历史”，默认清理 `SUCCESS`、`FAILED`、`TIMEOUT`、`CANCELLED`，活动任务不会被删除。
+- 任务详情“任务产物”右侧有“下载全部”，点击后得到 `boxpilot-<任务短 ID>.zip`；勾选多个任务后点“下载所选”，得到 `boxpilot-N-tasks.zip`，包内按任务短 ID 分目录。
 - 打开一个 `WEB_DIGEST` 任务详情，产物区每个文件都有“预览”“下载”。文本预览显示截断后的正文，图片预览显示整页截图，二进制文件提示下载。
 - 预览弹窗可用右上角关闭按钮或 `Esc` 关闭，弹窗内“下载文件”可用。
 
@@ -257,7 +283,7 @@ C,,y
 ./.venv/Scripts/python.exe -m unittest discover -s tests -v
 ```
 
-预期 `Ran 66 tests ... OK (skipped=1)`。真实沙箱用例默认跳过，其余 65 项使用替身沙箱。
+预期 `Ran 77 tests ... OK (skipped=1)`。真实沙箱用例默认跳过，其余 76 项使用替身沙箱。
 
 真实沙箱集成测试：
 
@@ -273,7 +299,50 @@ node --check frontend/task_list.js
 node --check frontend/create_task.js
 ```
 
-## 15. 人工测试记录模板
+## 15. 数据库持久化与重启恢复
+
+这一节确认任务记录不再随进程退出而丢失。
+
+### 15.1 表结构与初始化
+
+```powershell
+./.venv/Scripts/python.exe -m scripts.init_db
+```
+
+用任意 SQLite 工具打开 `data/boxpilot.db`，预期：
+
+- 只有 `tasks`、`steps`、`artifacts` 三张业务表。
+- `PRAGMA journal_mode` 返回 `wal`。
+- `PRAGMA user_version` 返回 `1`。
+
+如果数据库里已经有其他表或版本号不是 0/1，启动会报“无法使用此数据库结构”，换一个 `DATABASE_PATH` 即可。
+
+### 15.2 重启后任务仍在
+
+1. 提交一个 MOCK 任务，等待成功，记录任务 ID。
+2. 停止后端进程，再按第 1 节命令重新启动。
+3. 调用 `GET /tasks/{id}`，预期状态仍为 `SUCCESS`，步骤、结论和产物索引都在。
+4. 下载产物，文件内容和重启前一致。
+
+自动化脚本 `scripts/verify_sqlite_aio.py` 用两个先后独立的进程做了同样的检查，可作为对照。
+
+### 15.3 中断任务收尾
+
+1. 提交仓库体检或网页整理任务，等它进入 `RUNNING`。
+2. 直接结束后端进程，再重新启动。
+3. 查询该任务，预期状态为 `FAILED`，错误码 `SERVICE_RESTARTED`，不会永远停在运行中。
+4. 点击“重试任务”，应生成 `attempt=2` 的新任务。
+
+### 15.4 提交去重
+
+1. 同一个参数连续提交两次 MOCK 任务。
+2. 预期两次返回同一个任务 ID，第二次响应里 `deduplicated` 为 `true`，列表总数不增加。
+3. 等超过 `DEDUPE_WINDOW_SECONDS`（默认 300 秒）再提交，预期生成新任务。
+4. 失败或取消的任务不参与去重，可以直接重试。
+
+注意：同一个数据库不要同时被多个后端进程写入；单进程单 Worker 是当前设计前提。
+
+## 16. 人工测试记录模板
 
 | 编号 | 场景 | 操作 | 预期 | 实际 | 通过 |
 |---|---|---|---|---|---|
@@ -288,7 +357,7 @@ node --check frontend/create_task.js
 | M09 | 窄屏页面 | 800 px 宽度 | 无横向溢出 |  |  |
 | M10 | 离线仓库体检 | 提交 `demo://python` | 报告 passed，生成报告、JSON 和测试日志 3 个产物 |  |  |
 | M11 | 网页标题不匹配 | 提交错误预期标题 | 任务成功，报告 passed=false |  |  |
-| M12 | 网页资料整理 | 提交本地任务页面 URL | 生成 `article.md`、整页截图和 JSON 报告 3 个产物 |  |  |
+| M12 | 网页资料整理 | 提交列表页 URL（books.toscrape.com） | 生成条目表 `article.md`、`items.json`、`items.csv`、整页截图和 JSON 报告 5 个产物，条目数为 20 |  |  |
 | M13 | CSV 空文件 | 上传空 CSV | 返回明确校验错误 |  |  |
 | M14 | 运行中取消 | 执行期间点击取消 | 步骤边界落为 `CANCELLED` |  |  |
 | M15 | 失败重试 | 失败任务点击重试 | 新任务 `attempt=2`，`retry_of` 正确 |  |  |
@@ -305,3 +374,10 @@ node --check frontend/create_task.js
 | M26 | 重复提交 | 用同一参数连续提交两次 MOCK 或网页任务 | 第二次返回同一任务 ID，`deduplicated` 为 `true`，不新增任务 |  |  |
 | M27 | 内网地址 | 提交 `http://127.0.0.1:8080/` 或 `http://host.docker.internal/` | 第一步校验失败，任务 `FAILED`、错误码 `VALIDATION_ERROR`，提示改用公网地址 |  |  |
 | M28 | 提交限流 | 把 `RATE_LIMIT_PER_MINUTE` 调到 2，连续提交三次 | 前两次 202，第三次 429，错误码 `RATE_LIMITED`，带 `Retry-After` |  |  |
+| M29 | 数据库初始化 | 运行 `python -m scripts.init_db` | 三张业务表、`journal_mode=wal`、`user_version=1` |  |  |
+| M30 | 重启持久化 | 建 MOCK 任务成功后重启后端再查询 | 状态、步骤、结论和产物索引仍在，产物可下载 |  |  |
+| M31 | 中断任务恢复 | 运行中直接结束后端再启动 | 任务落为 `FAILED`、错误码 `SERVICE_RESTARTED`，可重试 |  |  |
+| M32 | 提交去重 | 同参数连续提交两次，再等过窗口期提交 | 前两次同 ID 且 `deduplicated=true`，过窗口后生成新任务 |  |  |
+| M33 | 一键与批量下载 | 任务详情点“下载全部”；勾选两个任务点“下载所选” | 分别得到单任务 zip 与按任务名分目录的批量 zip，文件可解压 |  |  |
+| M34 | 批量订阅 | 创建页填两行地址、批次名“每周巡检”后提交 | 列表只出现该批次，标题显示“类型 · 目标”，带批次标签；详情可“重跑本批” |  |  |
+| M35 | 下载命名 | 下载任一单任务 zip，解压并查看文件名 | 压缩包与内部文件均为 `类型_目标_时间_短ID`，时间与界面一致 |  |  |

@@ -115,6 +115,28 @@ class BatchDeleteRequest(BaseModel):
     task_ids: list[str] = Field(min_length=1, max_length=200)
 
 
+class BatchCreateRequest(BaseModel):
+    """批量订阅：一行一个目标地址，统一带上批次名称。"""
+    task_type: TaskType
+    targets: list[str] = Field(min_length=1, max_length=20)
+    batch_name: str = Field(default="", max_length=40)
+
+
+class BatchCreateItem(BaseModel):
+    target: str
+    task_id: str | None = None
+    deduplicated: bool = False
+    error: str | None = None
+
+
+class BatchCreateResponse(BaseModel):
+    batch_id: str
+    batch_name: str
+    created: int
+    deduplicated: int
+    items: list[BatchCreateItem]
+
+
 class BatchDeleteResponse(BaseModel):
     deleted: int
     skipped: list[str] = Field(default_factory=list)

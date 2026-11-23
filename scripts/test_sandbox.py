@@ -44,7 +44,7 @@ def main() -> int:
     checks["file_write"] = adapter.write_text_file(task_id, "smoke.txt", "BoxPilot sandbox file check")
     checks["file_read"] = adapter.read_text_file(task_id, "smoke.txt")
     checks["shell"] = adapter.exec_shell("printf 'BoxPilot shell check'", task_id=task_id, timeout_s=20)
-    checks["navigation"] = adapter.navigate("http://127.0.0.1:8080", timeout_s=20)
+    checks["navigation"] = adapter.navigate("https://example.com/", timeout_s=20)
 
     # 页面文本只记录长度，避免把整页内容输出到终端。
     page_text = adapter.get_page_text()

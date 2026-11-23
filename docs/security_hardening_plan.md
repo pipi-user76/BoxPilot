@@ -1,6 +1,6 @@
 # BoxPilot 安全边界改进方案
 
-> 实施状态（2026-11-13）：四项改进已落地。命令构造见 `backend/command.py`；URL/SSRF 见 `backend/validation.py` 的 `validate_public_url`；幂等与限流见 `backend/dedupe.py`、`backend/routes_tasks.py`、`backend/main.py`；超时结构见 `backend/sandbox_client.py`。测试共 66 项，其中 12 项专门覆盖这些边界（`tests/test_security.py`）。
+> 实施状态（2026-11-13）：四项改进已落地。命令构造见 `backend/command.py`；URL/SSRF 见 `backend/validation.py` 的 `validate_public_url`；幂等与限流见 `backend/dedupe.py`、`backend/routes_tasks.py`、`backend/main.py`；超时结构见 `backend/sandbox_client.py`。测试共 70 项（69 项通过、1 项真实沙箱用例默认跳过），其中 12 项专门覆盖这些边界（`tests/test_security.py`）。
 
 
 编制日期：2026-11-13

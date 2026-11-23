@@ -115,6 +115,7 @@ class AdvancedApiTests(unittest.TestCase):
         self.addCleanup(remove_temp_dir, self.temp_dir)
         self.artifact_store = ArtifactStore(self.temp_dir)
         self.app = create_app(
+            database_path=self.temp_dir / "tasks.db",
             artifact_store=self.artifact_store,
             adapter=sandbox or StubSandbox(),
             templates=templates,

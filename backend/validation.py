@@ -53,8 +53,26 @@ def safe_relative_path(path: str) -> str:
     return pure.as_posix()
 
 
+def normalize_url(url: str) -> str:
+    """补全省略的协议头；用户输入 books.toscrape.com 时按 https 处理。"""
+    value = (url or "").strip()
+    if not value:
+        raise ValidationFailure("地址不能为空")
+    if any(char.isspace() for char in value):
+        raise ValidationFailure("地址里不能包含空格")
+    if value.startswith("//"):
+        return f"https:{value}"
+    if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", value):
+        return f"https://{value}"
+    return value
+
+
 def validate_http_url(url: str) -> str:
-    """只允许无凭据的 HTTP/HTTPS 绝对地址，并限制长度与控制字符。"""
+    """只允许无凭据的 HTTP/HTTPS 地址，并限制长度与控制字符。
+
+    未写协议头的输入会按 https 补全，因此返回的是规范化后的地址。
+    """
+    url = normalize_url(url)
     if len(url) > settings.URL_MAX_LENGTH:
         raise ValidationFailure("地址过长")
     if any(ord(char) < 0x20 or ord(char) == 0x7F for char in url):
@@ -104,7 +122,7 @@ def validate_public_url(url: str) -> str:
 
     注意：应用层校验挡不住浏览器内的跳转，部署时仍应给沙箱配置出站白名单。
     """
-    validate_http_url(url)
+    url = validate_http_url(url)
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
     if not host or host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_SUFFIXES):

@@ -1,8 +1,4 @@
-"""文件职责：定义任务持久化契约，并提供开发期使用的内存实现。
-
-生产版本将由陈咏忻在此文件中接入 SQLite 三表：tasks、steps、artifacts。当前
-InMemoryTaskStore 用于打通 API、调度器和测试，服务重启后数据不会保留。
-"""
+"""共享任务存储协议及内存测试实现。"""
 
 from __future__ import annotations
 
@@ -11,26 +7,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Protocol
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
-
 from backend.models import Artifact, StepStatus, TaskRecord, TaskStatus, TaskStep, TaskType, utc_now
-
-
-SQLALCHEMY_DATABASE_URL = "sqlite:///./data/boxpilot.db"
-# SQLite 默认限制连接线程；FastAPI 的后台任务会在不同线程访问连接，因此关闭该限制。
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-
-def get_db():
-    """FastAPI 数据库依赖：请求结束后一定关闭 Session。"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 class TaskStore(Protocol):
@@ -43,6 +20,7 @@ class TaskStore(Protocol):
         attempt: int = 1,
         retry_of: str | None = None,
         dedupe_key: str | None = None,
+        dedupe_since: datetime | None = None,
     ) -> TaskRecord: ...
 
     def find_by_dedupe(self, dedupe_key: str, since: datetime) -> TaskRecord | None: ...
@@ -93,7 +71,9 @@ class TaskStore(Protocol):
 
 
 class InMemoryTaskStore:
-    """第 1 周契约实现，后续由陈咏忻替换为 SQLite 版本。"""
+    """独立测试可显式注入的内存实现。"""
+
+    name = "memory"
 
     def __init__(self) -> None:
         self._tasks: dict[str, TaskRecord] = {}
@@ -109,6 +89,7 @@ class InMemoryTaskStore:
         attempt: int = 1,
         retry_of: str | None = None,
         dedupe_key: str | None = None,
+        dedupe_since: datetime | None = None,
     ) -> TaskRecord:
         # 重试任务使用新的任务 ID，并通过 attempt/retry_of 保留来源关系。
         task = TaskRecord(
@@ -119,6 +100,10 @@ class InMemoryTaskStore:
             dedupe_key=dedupe_key,
         )
         with self._lock:
+            if dedupe_key and dedupe_since is not None:
+                existing = self.find_by_dedupe(dedupe_key, dedupe_since)
+                if existing is not None:
+                    return existing.model_copy(update={"deduplicated": True})
             self._tasks[task.id] = task
         return task.model_copy(deep=True)
 

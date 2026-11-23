@@ -11,10 +11,10 @@ from backend.validation import ValidationFailure, validate_public_url
 
 
 def guard_url(context: TaskContext) -> str:
-    """校验 params.url，写入 context.state["url"] 并返回原值。"""
+    """校验 params.url，补全省略的协议头，写入 context.state["url"]。"""
     url = str(context.params.get("url", "")).strip()
     try:
-        validate_public_url(url)
+        url = validate_public_url(url)
     except ValidationFailure as exc:
         raise StepExecutionError(
             "VALIDATION_ERROR",

@@ -179,7 +179,8 @@ class TaskRunner:
             self._finish_cancelled(task_id, task.task_type, [], {})
             return
 
-        self.store.start_task(task_id)
+        if self.store.start_task(task_id).status != TaskStatus.RUNNING:
+            return
         self.log.info(
             "task_started",
             extra={

@@ -8,10 +8,10 @@ const taskType = document.querySelector("#task-type");
 const message = document.querySelector("#form-message");
 
 const fieldMap = {
-  WEB_DIGEST: ["url"],
+  WEB_DIGEST: ["url", "batch_targets", "batch_name"],
   CSV_ANALYSIS: ["file"],
-  REPO_CHECK: ["repo_url"],
-  WEB_ACCEPTANCE: ["url", "expected_title"],
+  REPO_CHECK: ["repo_url", "batch_targets", "batch_name"],
+  WEB_ACCEPTANCE: ["url", "expected_title", "batch_targets", "batch_name"],
 };
 
 function updateFields() {
@@ -56,8 +56,29 @@ form.addEventListener("submit", async (event) => {
       body.append("file", fileInput.files[0]);
       response = await fetch("/tasks/csv", { method: "POST", body });
     } else {
+      // 批量框里有内容时一次创建多个任务，任务共享同一个批次名。
+      const targets = valueOf("batch_targets")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (targets.length > 0) {
+        response = await fetch("/tasks/batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            task_type: taskType.value,
+            targets,
+            batch_name: valueOf("batch_name"),
+          }),
+        });
+        if (!response.ok) throw new Error(await readError(response));
+        const batch = await response.json();
+        window.location.assign(`task_list.html?q=${encodeURIComponent(batch.batch_id)}`);
+        return;
+      }
       const params = {};
       for (const field of fieldMap[taskType.value] || []) {
+        if (field === "batch_targets" || field === "batch_name") continue;
         const value = valueOf(field);
         if (value) params[field] = value;
       }

@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>创建任务 | BoxPilot</title>
-  <link rel="stylesheet" href="styles.css?v=20261112-2">
+  <link rel="stylesheet" href="styles.css?v=20261123-2">
 </head>
 <body>
   <header class="app-header">
@@ -41,6 +41,15 @@
         <span>预期标题</span>
         <input id="expected_title" name="expected_title" type="text">
       </label>
+      <label data-field="batch_targets" hidden>
+        <span>批量地址（每行一个，留空则只创建上面的单个任务）</span>
+        <textarea id="batch_targets" name="batch_targets" rows="5" spellcheck="false"
+          placeholder="https://example.com/a&#10;https://example.com/b"></textarea>
+      </label>
+      <label data-field="batch_name" hidden>
+        <span>批次名称（可选，用于筛选和重跑）</span>
+        <input id="batch_name" name="batch_name" type="text" maxlength="40" placeholder="例如：每周竞品检查">
+      </label>
       <label data-field="file" hidden>
         <span>CSV 文件</span>
         <input id="file" name="file" type="file" accept=".csv,text/csv">
@@ -51,6 +60,6 @@
       </div>
     </form>
   </main>
-  <script src="create_task.js?v=20261112-2"></script>
+  <script src="create_task.js?v=20261123-2"></script>
 </body>
 </html>

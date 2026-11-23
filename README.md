@@ -2,6 +2,14 @@
 
 BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任务、按固定步骤调用沙箱并记录状态、步骤与产物，最终通过 HTTP 提供查询和下载。
 
+## 快速使用源码包
+
+解压后进入本 README 所在目录，准备 Python 3.13、uv 和 Docker，按下方步骤启动 AIO Sandbox 及后端。数据库自动创建，采用单进程、单 Worker 运行。
+
+`samples/normal.csv` 是包含 99 条商品明细的模拟超市数据，含 8 个品类、3 条重复行、10 个缺失单元格，预期完整度为 99.1%。`baseline.csv` 是三行基础样例，另提供缺失重复样例和空文件。
+
+此包包含源码、静态页面、依赖锁定文件、测试及使用说明。运行环境依赖由 `uv sync --locked` 安装，运行时数据由服务生成。
+
 ## 项目定位
 
 浏览器能打开网页，Git 客户端能拉仓库，为什么还需要这个项目？区别在于“看一次”和“反复按同一标准检查并留下记录”。
@@ -20,7 +28,7 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 
 ## 当前进度
 
-更新时间：2026-11-12。当前状态为“四个模板可运行，仓库体检默认准备 uv 测试环境并按需补装 Python，产物已按用途收敛”。
+更新时间：2026-11-23。集成版默认接入 SQLite 三表，四个模板沿用统一 API、调度器和沙箱适配器。工作台支持批量订阅、全选下载与规范命名，数据库与产物目录共同保存任务结果。
 
 | 模块 | 状态 | 当前实现 |
 |---|---|---|
@@ -32,45 +40,50 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 | CSV 分析 `CSV_ANALYSIS` | 已完成 | multipart 上传、标准库分析、`summary.json`（列类型、缺失、唯一值、高频值）、中文 `report.md` |
 | 仓库体检 `REPO_CHECK` | 已完成 | 白名单仓库、固定测试命令、离线 `demo://python`、失败重试、中文错误说明与失败报告；默认用 uv 在任务目录建独立虚拟环境，按 `requires-python` 选或现场补装 3.13/3.12/3.11/3.10，装完依赖再补 pytest 并尽量把项目装成可编辑包 |
 | 网页验收 `WEB_ACCEPTANCE` | 已完成 | 标题比对、整页截图、`acceptance.json`（预期/实际标题、状态码、加载耗时、截图大小、检查时间） |
-| Web 工作台 | 已完成进阶版 | 服务端搜索与分页、批量清理、取消/重试、任务结论、文本与图片预览 |
-| SQLite 持久化 | 待接入 | 当前仍使用内存 `TaskStore`，重启后任务记录丢失 |
-| 10 至 15 个系统样例 | 进行中 | 已有 66 项自动化测试，尚需形成统一验收表和统计报告 |
+| Web 工作台 | 已完成进阶版 | 服务端搜索与分页、批量订阅、全选与批量下载、一键下载全部、取消/重试、任务结论、文本与图片预览 |
+| 下载命名 | 已完成 | 任务与压缩包统一为 `类型_目标_时间_短ID`，批量包按任务名分目录 |
+| SQLite 持久化 | 已接入 | 应用默认使用 SQLite 存储任务、步骤和产物索引 |
+| 10 至 15 个系统样例 | 进行中 | 已有 77 项自动化测试，尚需形成统一验收表和统计报告 |
 
 当前已注册 `MOCK`、`CSV_ANALYSIS`、`WEB_DIGEST`、`REPO_CHECK` 和 `WEB_ACCEPTANCE`。未知任务类型会返回明确校验错误，不会生成伪成功任务。
 
 最近验证结果：
 
-- 66 项 Python 测试中 65 项执行通过，1 项真实沙箱集成测试默认跳过。
-- 真实 `WEB_DIGEST` 使用沙箱 Readability 去噪，产物为 3 个文件（正文、整页截图、报告），正文 130 词，整页截图约 75 KB。
+- 77 项 Python 测试中，1 项真实沙箱集成测试默认跳过。
+- 真实 `WEB_DIGEST` 使用沙箱 Readability 去噪并识别列表条目，`books.toscrape.com` 抽出 20 条、268 词，产出 5 个文件（正文、条目 JSON、条目 CSV、整页截图、报告）。
+- 批量订阅一次提交多个地址，共享同一批次号；批次可在列表里筛选，详情里可一键重跑。
+- 任务与压缩包按 `类型_目标_时间_短ID` 命名，单个压缩包内的文件也带同一前缀，下载后不会互相覆盖。
 - 真实仓库体检默认建 `.venv` 并现场补装 Python 3.13.6，装完依赖后跑通本项目 44 项测试（1 项跳过）。
 - 真实 CSV 分析生成 `summary.json` 与中文 `report.md`，样例完整度 91.7%。
 - 真实取消任务在步骤边界落为 `CANCELLED`，失败任务重试生成 `attempt=2` 且 `retry_of` 指向原任务。
 - 列表分页、搜索、批量清理、文本预览和图片预览均已通过浏览器联调。
-- 当前 `/health` 返回 `ok`。
+- 健康检查反映运行时状态；服务与 AIO Sandbox 启动后检查 `/health`。
 
 ## 产物清单
 
 | 模板 | 产物 | 说明 |
 |---|---|---|
-| `WEB_DIGEST` | `article.md`、`screenshot.png`、`web-digest.json` | 正文只保留一份；报告含词数、预计阅读分钟、标题数、链接数、图片数、截图大小与生成时间 |
+| `WEB_DIGEST` | `article.md`、`items.json`、`items.csv`、`screenshot.png`、`web-digest.json` | 列表页抽条目成表，文章页只留正文、截图和报告；报告含词数、阅读时长、条目数与爬虫元数据 |
 | `CSV_ANALYSIS` | `summary.json`、`report.md` | JSON 含行列数、重复行、缺失单元格、完整度、每列类型/唯一值/示例/高频值；Markdown 为中文列概览表 |
 | `REPO_CHECK` | `check-report.md`、`check-report.json`、`test.log` | 成功时的最小集合；克隆重试过才有 `clone.log`，安装失败才有 `install.log`；`install-result.json` 只留在沙箱 |
 | `WEB_ACCEPTANCE` | `acceptance.json`、`page.png` | JSON 含预期/实际标题、是否通过、状态码、加载耗时、截图大小、检查时间 |
 
 失败任务同样会留下能解释原因的产物，例如仓库克隆失败时的 `clone-failure.json`。
 
+下载时的命名规则：`web-digest_books.toscrape.com_20261123-2204_e24e56ee.zip`。单任务包内是 `web-digest_..._article.md` 这类带前缀的文件；批量包按任务名建目录，目录内保留原文件名。
+
 ## 下一步计划
 
 | 优先级 | 时间 | 工作内容 | 完成标准 |
 |---|---|---|---|
-| P0 | 11/08-11/12 | 陈咏忻接入 SQLite 四表（`tasks`、`steps`、`artifacts`、`task_events`）、`init_db.py` 和持久化 `TaskStore` | 重启后端后任务、步骤和产物仍可查询 |
-| P0 | 11/08-11/12 | 用持久化存储跑通四个模板的端到端回归 | 四种任务各至少一次成功并生成非空产物 |
+| 已完成 | SQLite 三表 | 默认持久化 `TaskStore` 已接入 | 重启后任务、步骤和产物仍可查询 |
+| 已完成 | 2026-11-16 | 四模板持久化真实沙箱回归 | 四类任务成功，重启后详情与产物内容一致 |
 | P1 | 11/13-11/17 | 建立 10 至 15 个统一测试用例和结果登记表 | 记录预期、实际、耗时、成功率及失败原因 |
 | P1 | 11/13-11/17 | 日志落盘检索与演示脚本 | 用 JSON 日志还原一次失败任务的完整经过 |
 | P2 | 11/18-11/24 | 认证、限流与独立沙箱隔离评估 | 非本机访问时必须携带凭据 |
 | P2 | 11/25-12/04 | README、设计文档、演示数据、演示视频和发布检查 | 在干净环境按文档启动并完成现场演示 |
 
-已知限制：沙箱网络受限时，公开仓库克隆可能超时或被拒绝；系统会自动重试一次，并给出中文原因和替代方案，现场演示优先使用 `demo://python`。内存任务存储尚未替换，服务重启后任务与日志外的运行状态丢失。
+已知限制：沙箱网络受限时，公开仓库克隆可能超时或被拒绝；系统会自动重试一次，并给出中文原因和替代方案，现场演示优先使用 `demo://python`。
 
 ## 环境要求
 
@@ -93,9 +106,11 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 
 ## 安装与启动后端
 
+应用启动时自动初始化 SQLite。已有本地容器可通过 `SANDBOX_URL` 指定，请参阅 [SQLite 集成与验收](docs/sqlite_integration.md)。
+
 ```powershell
 uv sync
-uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 访问：
@@ -108,7 +123,7 @@ uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 如果当前终端无法启动项目虚拟环境，可直接使用：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 ## 验证沙箱
@@ -125,7 +140,7 @@ uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-预期结果：`Ran 66 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 65 项使用替身沙箱，不需要 Docker。
+预期结果：`Ran 77 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 76 项测试可在未启动 Docker 时执行。
 
 运行真实沙箱集成测试：
 
@@ -142,6 +157,7 @@ $env:BOXPILOT_RUN_SANDBOX_TESTS='1'
 |---|---|---|
 | `GET` | `/health` | 应用与沙箱状态 |
 | `POST` | `/tasks` | 创建普通 JSON 任务 |
+| `POST` | `/tasks/batch` | 批量订阅：一次提交多个地址，共享批次号与批次名 |
 | `POST` | `/tasks/csv` | 上传 CSV 并创建分析任务 |
 | `GET` | `/tasks` | 任务列表，支持 `q`、`status`、`task_type`、`page`、`page_size` |
 | `GET` | `/tasks/{id}` | 任务、步骤和产物详情 |
@@ -150,10 +166,16 @@ $env:BOXPILOT_RUN_SANDBOX_TESTS='1'
 | `POST` | `/tasks/batch-delete` | 批量删除已结束任务 |
 | `POST` | `/tasks/cleanup` | 按状态和天数清理历史任务 |
 | `GET` | `/tasks/{id}/artifacts` | 任务产物清单 |
+| `GET` | `/tasks/{id}/artifacts/archive` | 一键打包下载，文件名形如 `web-digest_quotes.toscrape.com_20261123-2204_d999048a.zip` |
+| `GET` | `/tasks/artifacts/archive?task_ids=a,b` | 批量打包下载，最多 50 个任务，按任务规范名分目录 |
 | `GET` | `/artifacts/{id}/download` | 下载已登记产物，`?inline=1` 供浏览器内联显示 |
 | `GET` | `/artifacts/{id}/preview` | 文本截断预览或图片预览地址 |
 
 `GET /tasks` 返回 `{items, total, page, page_size, pages, counts}`；`counts` 始终统计全量任务，不受筛选条件影响。取消运行中的任务在“步骤之间”生效，当前步骤不会被强制中断。
+
+`POST /tasks/batch` 接收 `{task_type, targets, batch_name}`，一行一个地址，单次最多 20 个。同一批任务共享 `_batch_id`，按批次号搜索即可筛出整批；详情里的“重跑本批”会按原地址重建一批任务。
+
+下载命名统一为 `类型_目标_时间_短ID`：单任务压缩包内每个文件都带这个前缀，批量包按该名字分目录，同名产物不会互相覆盖。
 
 当前可直接创建的任务示例：
 
@@ -221,7 +243,8 @@ Select-String -Path .\logs\boxpilot.jsonl -Pattern '<task_id>'
 ```text
 backend/
   main.py            FastAPI 应用和公共路由装配
-  db.py              SQLite 连接、TaskStore 与临时内存实现
+  db.py              TaskStore 协议与内存测试实现
+  sqlite_store.py    SQLite 三表及持久化实现
   scheduler.py       状态机、固定步骤调度、取消与重试
   logging_config.py  JSON Lines 结构化日志
   sandbox_client.py  Shell/File/Browser 统一调用
@@ -255,7 +278,7 @@ docs/                接口契约与验收记录
 
 ## 已知限制
 
-- 当前任务存储为内存实现，服务重启后任务记录丢失；等待陈咏忻接入 SQLite 四表。
+- SQLite 默认运行于单进程、单 Worker。重启时中断任务标记为失败，可手动重试。详见 [SQLite 集成与验收](docs/sqlite_integration.md)。
 - 运行中任务的取消在步骤边界生效，正在执行的 Shell 或浏览器动作不会被强制终止。
 - 当前公开仓库体检可能受沙箱网络出口影响：克隆会失败重试，装依赖也可能超时；离线演示使用 `demo://python`。
 - 沙箱自带 Python 3.10 与 3.12；3.13 在任务开始时按需补装，镜像不可达时才会降级试跑并在报告里标注。

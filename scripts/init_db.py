@@ -1,5 +1,8 @@
-"""文件职责：初始化 SQLite 三表，负责人为陈咏忻。
+"""Idempotently initialize the configured SQLite database."""
+from backend.config import settings
+from backend.sqlite_store import SQLiteTaskStore
 
-正式实现应在重复执行时保持幂等，并创建 tasks、steps、artifacts 三张表。
-当前文件作为约定占位，不能把“文件存在”视为数据库已完成。
-"""
+if __name__ == '__main__':
+    store = SQLiteTaskStore(settings.DATABASE_PATH)
+    store.init_db()
+    print(store.path)

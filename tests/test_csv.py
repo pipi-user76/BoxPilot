@@ -79,7 +79,7 @@ class CsvApiTests(unittest.TestCase):
         self.temp_dir = make_temp_dir()
         self.addCleanup(remove_temp_dir, self.temp_dir)
         artifact_store = ArtifactStore(self.temp_dir)
-        context = TestClient(create_app(artifact_store=artifact_store, adapter=CsvSandbox()))
+        context = TestClient(create_app(database_path=self.temp_dir / "tasks.db", artifact_store=artifact_store, adapter=CsvSandbox()))
         self.addCleanup(context.__exit__, None, None, None)
         self.client = context.__enter__()
 

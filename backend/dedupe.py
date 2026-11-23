@@ -14,10 +14,15 @@ from backend.models import TaskType
 
 
 def canonical_params(params: dict[str, Any]) -> str:
-    """规范化参数：排序键、去掉空白字符串，再用紧凑 JSON 序列化。"""
+    """规范化参数：排序键、去掉空白字符串，再用紧凑 JSON 序列化。
+
+    下划线开头的键是批次标记，只用于展示和重跑，不参与幂等判断，
+    否则同一批地址每次提交都会被当成新任务。
+    """
     cleaned = {
         str(key): (value.strip() if isinstance(value, str) else value)
         for key, value in params.items()
+        if not str(key).startswith("_")
     }
     return json.dumps(cleaned, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 

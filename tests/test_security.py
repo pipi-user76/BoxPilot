@@ -81,6 +81,11 @@ class UrlGuardTests(unittest.TestCase):
     def test_accepts_public_address(self, _dns) -> None:
         self.assertEqual(validate_public_url("https://example.com/page"), "https://example.com/page")
 
+    @patch("backend.validation.socket.getaddrinfo", return_value=PUBLIC_DNS)
+    def test_adds_missing_https_scheme(self, _dns) -> None:
+        self.assertEqual(validate_public_url("example.com/page"), "https://example.com/page")
+        self.assertEqual(validate_http_url("books.toscrape.com"), "https://books.toscrape.com")
+
     @patch("backend.validation.socket.getaddrinfo", return_value=PRIVATE_DNS)
     def test_rejects_private_resolution(self, _dns) -> None:
         with self.assertRaises(ValidationFailure):

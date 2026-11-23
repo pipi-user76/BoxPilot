@@ -7,9 +7,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 from datetime import datetime, timezone
+from urllib.parse import urljoin
 
 from backend.config import settings
 from backend.sandbox_client import SandboxAdapter
@@ -22,6 +25,93 @@ _WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9'-]*")
 _HEADING = re.compile(r"(?m)^#{1,6}\s")
 _LINK = re.compile(r"\[[^\]]+\]\([^)]+\)")
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
+_MD_LINK = re.compile(r"(!?\[[^\]]*\]\()([^)\s]+)(\))")
+_URL_IN_LINK = re.compile(r"\((?:https?://)[^)]+\)")
+_ABSOLUTE_PREFIXES = ("http://", "https://", "mailto:", "tel:", "#", "data:")
+
+# 在页面里寻找“重复出现、每条带链接”的容器，抽出标题、价格、库存、评分和图片。
+# 纯浏览器端逻辑，不依赖站点专用选择器，列表页和商品页都能用。
+_ITEM_SCRIPT = r"""
+(() => {
+  const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  const abs = (value) => { try { return new URL(value, location.href).href; } catch (e) { return value || ''; } };
+  const priceRe = /(?:[$£€¥]|USD|CNY|EUR|RMB)\s?\d[\d,.]*/;
+  const clsOf = (node) => String(node.className || '').trim().split(/\s+/).slice(0, 2).join('.');
+  const sigOf = (el) => {
+    const parent = el.parentElement;
+    const prefix = parent ? parent.tagName + (clsOf(parent) ? '.' + clsOf(parent) : '') : '';
+    return prefix + '>' + el.tagName + (clsOf(el) ? '.' + clsOf(el) : '');
+  };
+  const groups = new Map();
+  const nodes = Array.from(document.querySelectorAll('article, li, [class*="product"], [class*="item"], [class*="card"]'));
+  for (const el of nodes) {
+    const sig = sigOf(el);
+    if (!groups.has(sig)) groups.set(sig, []);
+    groups.get(sig).push(el);
+  }
+  // 同时看“重复次数”和“是否像商品/条目”：带价格且有一定文字的块优先，
+  // 这样导航菜单（同样是重复 li、也带链接）不会盖过真正的商品网格。
+  let best = null;
+  for (const [sig, els] of groups) {
+    if (els.length < 3) continue;
+    const linked = els.filter((item) => item.querySelector('a[href]')).length;
+    if (linked < els.length * 0.8) continue;
+    let rich = 0;
+    for (const el of els) {
+      const text = norm(el.innerText);
+      if (priceRe.test(text) && text.length > 20) rich += 1;
+    }
+    const score = rich * 10 + els.length;
+    if (!best || score > best.score) best = { sig: sig, els: els, rich: rich, score: score };
+  }
+  if (!best) return JSON.stringify({ detected: false, selector: '', items: [] });
+  const items = best.els.map((el) => {
+    // 列表页常把标题截断成“A Light in the ...”，完整标题放在 a[title]。
+    const link = el.querySelector('a[href][title]') || el.querySelector('h1 a[href], h2 a[href], h3 a[href], h4 a[href]') || el.querySelector('a[href]');
+    const img = el.querySelector('img');
+    const heading = el.querySelector('h1,h2,h3,h4,h5');
+    const text = norm(el.innerText);
+    const title = norm(link && link.getAttribute('title')) || norm(heading && heading.textContent) || norm(link && link.textContent);
+    const price = (text.match(priceRe) || [''])[0];
+    const stockMatch = text.match(/in stock|out of stock|有货|缺货|库存紧张/i);
+    const ratingMatch = String((el.querySelector('[class*="star-rating"]') || {}).className || '').match(/star-rating\s+(\w+)/i);
+    return {
+      title: title,
+      price: norm(price),
+      stock: stockMatch ? norm(stockMatch[0]) : '',
+      rating: ratingMatch ? ratingMatch[1] : '',
+      link: link ? abs(link.getAttribute('href')) : '',
+      image: img ? abs(img.getAttribute('src') || '') : '',
+      text: text.slice(0, 200)
+    };
+  }).filter((item) => item.title || item.link);
+  return JSON.stringify({ detected: items.length >= 3, selector: best.sig, items: items });
+})()
+"""
+
+
+def _absolutize_links(markdown: str, base_url: str) -> str:
+    """把 Readability 产出的相对链接补成绝对地址，方便直接点开和二次使用。"""
+
+    def replace(match: re.Match[str]) -> str:
+        target = match.group(2)
+        if target.startswith(_ABSOLUTE_PREFIXES):
+            return match.group(0)
+        return f"{match.group(1)}{urljoin(base_url, target)}{match.group(3)}"
+
+    return _MD_LINK.sub(replace, markdown)
+
+
+def _tidy_markdown(markdown: str) -> str:
+    """压缩多余空行，去掉行尾空白，保持正文紧凑可读。"""
+    lines = [line.rstrip() for line in markdown.splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _count_words(markdown: str) -> int:
+    """统计中英文词数；链接地址不算正文，避免绝对化后字数虚高。"""
+    plain = _URL_IN_LINK.sub("()", markdown)
+    return len(_CJK.findall(plain)) + len(_WORD.findall(plain))
 
 
 class WebDigestTemplate:
@@ -35,7 +125,7 @@ class WebDigestTemplate:
         self.steps = (
             StepDefinition("校验网页地址", validate_public_url_step),
             StepDefinition("打开网页", self._open_page),
-            StepDefinition("提取正文并去噪", self._extract_article),
+            StepDefinition("提取正文与条目", self._extract_article),
             StepDefinition("截取整页截图", self._capture_screenshot),
             StepDefinition("生成整理报告", self._write_report),
         )
@@ -60,7 +150,11 @@ class WebDigestTemplate:
         return StepOutcome(output=f"页面已打开，标题：{context.state['title'] or '未获取到标题'}")
 
     def _extract_article(self, context: TaskContext) -> StepOutcome:
-        """优先用 Readability 提取正文并转 Markdown，失败时退回页面可见文本。"""
+        """先尝试结构化抽取；列表页产出条目表，普通页面退回正文整理。"""
+        items, selector = self._extract_items()
+        if items:
+            return self._write_structured(context, items, selector)
+
         mode = "readability"
         markdown = ""
         result = self.sandbox.get_page_markdown()
@@ -83,16 +177,120 @@ class WebDigestTemplate:
         if not markdown:
             raise StepExecutionError("ARTIFACT_EMPTY", "page body is empty")
 
-        article_spec = context.artifact_store.write_text(context.task_id, "article.md", markdown + "\n")
+        # 脚本渲染或需要登录的页面，常只留下导航文字或一张图片链接。
+        # 这类内容虽非空，但对用户没有价值，按“正文过少”失败，避免产出空报告。
+        cjk = len(_CJK.findall(markdown))
+        latin = len(_WORD.findall(markdown))
+        if cjk + latin < 20 and len(markdown) < 400:
+            raise StepExecutionError(
+                "CONTENT_EMPTY",
+                "页面正文过少，可能是脚本渲染、需要登录或尚未加载完成。"
+                "请换一个有正文的页面，或等页面完全打开后再试。",
+            )
 
-        words = len(_CJK.findall(markdown)) + len(_WORD.findall(markdown))
-        context.state.update(article=markdown, extraction=mode, article_spec=article_spec, words=words)
+        base_url = str(context.state.get("url") or "")
+        body = _tidy_markdown(_absolutize_links(markdown, base_url))
+        words = _count_words(body)
+        mode_label = "Readability 去噪" if mode == "readability" else "可见文本回退"
+        article_spec = context.artifact_store.write_text(
+            context.task_id,
+            "article.md",
+            self._header(context, words, mode_label) + body + "\n",
+        )
+
+        context.state.update(article=body, extraction=mode, article_spec=article_spec, words=words)
         return StepOutcome(
-            output=(
-                f"正文提取完成（{'Readability 去噪' if mode == 'readability' else '可见文本回退'}）："
-                f"{words} 个词"
-            ),
+            output=f"正文提取完成（{mode_label}）：{words} 个词",
             artifacts=[article_spec],
+        )
+
+    def _extract_items(self) -> tuple[list[dict[str, str]], str]:
+        """在页面里找重复条目块；少于 3 条视为普通文章页。"""
+        result = self.sandbox.evaluate(_ITEM_SCRIPT)
+        if not result["success"]:
+            return [], ""
+        data = result["data"] or {}
+        if not isinstance(data, dict):
+            return [], ""
+        items = [
+            item
+            for item in data.get("items", [])
+            if isinstance(item, dict) and (item.get("title") or item.get("link"))
+        ]
+        if len(items) < 3:
+            return [], ""
+        return items, str(data.get("selector") or "")
+
+    def _header(self, context: TaskContext, words: int, mode: str, extra: list[str] | None = None) -> str:
+        """生成正文开头的来源信息块，方便离线阅读时知道内容从哪来。"""
+        lines = [
+            f"> 来源：{context.state['url']}",
+            f"> 标题：{context.state.get('title') or context.state['url']}",
+            f"> 抓取时间：{datetime.now(timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"> 提取方式：{mode}",
+        ]
+        if extra:
+            lines.extend(extra)
+        lines.extend([f"> 正文字数：{words}", "", "---", ""])
+        return "\n".join(lines)
+
+    def _write_structured(self, context: TaskContext, items: list[dict[str, str]], selector: str) -> StepOutcome:
+        """把列表页抽成条目表，同时输出 JSON 和 CSV，正文只保留表格。"""
+        columns = ["title", "price", "stock", "rating", "link", "image"]
+        title = str(context.state.get("title") or "").strip() or context.state["url"]
+        rows = []
+        for index, item in enumerate(items, start=1):
+            name = str(item.get("title") or "").replace("|", "\\|")
+            link = str(item.get("link") or "")
+            label = f"[{name}]({link})" if link else name
+            rows.append(
+                f"| {index} | {label} | {item.get('price') or ''} | "
+                f"{item.get('stock') or ''} | {item.get('rating') or ''} |"
+            )
+        body = "\n".join(
+            [
+                f"# {title}",
+                "",
+                f"共识别 {len(items)} 个条目（页面结构：`{selector or '未记录'}`）。",
+                "",
+                "| # | 标题 | 价格 | 库存 | 评分 |",
+                "|---|---|---|---|---|",
+                *rows,
+            ]
+        )
+        words = _count_words(body)
+        article = (
+            self._header(context, words, "结构化条目抽取", [f"> 条目数：{len(items)}"]) + body + "\n"
+        )
+        article_spec = context.artifact_store.write_text(context.task_id, "article.md", article)
+        payload = {
+            "url": context.state["url"],
+            "title": title,
+            "selector": selector,
+            "count": len(items),
+            "fields": columns,
+            "items": items,
+        }
+        json_spec = context.artifact_store.write_text(
+            context.task_id, "items.json", json.dumps(payload, ensure_ascii=False, indent=2)
+        )
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(items)
+        csv_spec = context.artifact_store.write_text(context.task_id, "items.csv", buffer.getvalue())
+
+        context.state.update(
+            article=body,
+            extraction="structured",
+            words=words,
+            item_count=len(items),
+            selector=selector,
+            article_spec=article_spec,
+        )
+        return StepOutcome(
+            output=f"识别到 {len(items)} 个条目，已生成条目表、JSON 和 CSV",
+            artifacts=[article_spec, json_spec, csv_spec],
         )
 
     def _capture_screenshot(self, context: TaskContext) -> StepOutcome:
@@ -115,7 +313,7 @@ class WebDigestTemplate:
     def _write_report(self, context: TaskContext) -> StepOutcome:
         """生成轻量元数据报告；正文本身在 article.md，截图在 screenshot.png。"""
         markdown = context.state["article"]
-        words = len(_CJK.findall(markdown)) + len(_WORD.findall(markdown))
+        words = _count_words(markdown)
         reading_minutes = max(1, round(words / 300))
         screenshot_bytes = context.state["screenshot_spec"].size_bytes
         report = {
@@ -125,6 +323,22 @@ class WebDigestTemplate:
             "load_time_ms": context.state["load_time_ms"],
             "extraction": context.state["extraction"],
             "full_page": context.state["full_page"],
+            "structured": {
+                "detected": bool(context.state.get("item_count")),
+                "count": context.state.get("item_count", 0),
+                "selector": context.state.get("selector", ""),
+                "fields": ["title", "price", "stock", "rating", "link", "image"]
+                if context.state.get("item_count")
+                else [],
+            },
+            "crawler": {
+                "engine": "AIO Sandbox Chromium",
+                "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "final_url": context.state["url"],
+                "http_status": context.state["http_status"],
+                "load_time_ms": context.state["load_time_ms"],
+                "items": context.state.get("item_count", 0),
+            },
             "content": {
                 "characters": len(markdown),
                 "words": words,
@@ -155,5 +369,6 @@ class WebDigestTemplate:
                 "extraction": context.state["extraction"],
                 "full_page": True,
                 "screenshot_bytes": screenshot_bytes,
+                "item_count": context.state.get("item_count", 0),
             },
         )

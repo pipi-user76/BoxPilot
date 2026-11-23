@@ -32,7 +32,7 @@ async def create_csv_task(
             detail={"code": "VALIDATION_ERROR", "message": "only .csv files are accepted"},
         )
 
-    content = await file.read()
+    content = await file.read(settings.MAX_CSV_UPLOAD_BYTES + 1)
     if not content:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -54,17 +54,14 @@ async def create_csv_task(
         TaskType.CSV_ANALYSIS,
         {"source_filename": original_name, "sha256": digest},
     )
-    existing = store.find_by_dedupe(
-        dedupe_key, utc_now() - timedelta(seconds=settings.DEDUPE_WINDOW_SECONDS)
-    )
-    if existing is not None:
-        return existing.model_copy(update={"deduplicated": True})
-
     task = store.create_task(
         TaskType.CSV_ANALYSIS,
         {"source_filename": original_name, "csv_filename": "input.csv"},
         dedupe_key=dedupe_key,
+        dedupe_since=utc_now() - timedelta(seconds=settings.DEDUPE_WINDOW_SECONDS),
     )
+    if task.deduplicated:
+        return task
     try:
         artifact_store.write_bytes(task.id, "input.csv", content, "text/csv")
     except Exception as exc:

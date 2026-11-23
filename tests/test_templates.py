@@ -38,6 +38,7 @@ class TemplateSandbox:
         python_install_version: str = "3.13",
         install_status: str = "ok",
         declared_dependencies: tuple[str, ...] = ("fastapi>=0.1",),
+        items: tuple[dict, ...] = (),
     ):
         self.title = title
         self.page_text = page_text
@@ -59,10 +60,12 @@ class TemplateSandbox:
         self.python_installs = 0
         self.install_status = install_status
         self.declared_dependencies = declared_dependencies
+        self.items = list(items)
         self.install_calls = 0
         self.install_result = ""
         self.install_log = ""
         self.commands: list[str] = []
+        self.navigated: list[str] = []
 
     def ensure_task_workspace(self, task_id: str) -> dict:
         return {"success": True, "data": {"path": f"/home/gem/boxpilot/{task_id}"}, "error": None}
@@ -154,6 +157,7 @@ class TemplateSandbox:
         return {"success": True, "data": {"path": f"/home/gem/boxpilot/{task_id}/{relative_path}"}, "error": None}
 
     def navigate(self, url: str, timeout_s: int | None = None) -> dict:
+        self.navigated.append(url)
         if not self.navigate_ok:
             return {"success": False, "data": None, "error": {"code": "COMMAND_FAILED", "message": "navigation failed"}}
         return {
@@ -178,6 +182,15 @@ class TemplateSandbox:
             "error": None,
         }
 
+    def evaluate(self, expression: str) -> dict:
+        if self.items:
+            return {
+                "success": True,
+                "data": {"detected": True, "selector": "OL.list>LI.item", "items": self.items},
+                "error": None,
+            }
+        return {"success": True, "data": {"detected": False, "selector": "", "items": []}, "error": None}
+
     def health(self) -> dict:
         return {"success": True, "data": {"base_url": "fake"}, "error": None}
 
@@ -188,7 +201,7 @@ class TemplateTests(unittest.TestCase):
         self.temp_dir = make_temp_dir()
         self.addCleanup(remove_temp_dir, self.temp_dir)
         artifact_store = ArtifactStore(self.temp_dir)
-        context = TestClient(create_app(artifact_store=artifact_store, adapter=sandbox))
+        context = TestClient(create_app(database_path=self.temp_dir / "tasks.db", artifact_store=artifact_store, adapter=sandbox))
         self.addCleanup(context.__exit__, None, None, None)
         return context.__enter__()
 
@@ -549,7 +562,7 @@ class TemplateTests(unittest.TestCase):
 
     def test_web_digest_produces_article_screenshot_and_report(self) -> None:
         """整理任务应产出正文、整页截图和报告三件产物，不再重复输出纯文本。"""
-        sandbox = TemplateSandbox(page_text="页面正文内容")
+        sandbox = TemplateSandbox(page_text="这是一个用于验证正文提取与截图流程的示例页面，内容长度足够触发正常路径。")
         client = self.create_client(sandbox)
         created = client.post(
             "/tasks",
@@ -563,17 +576,74 @@ class TemplateTests(unittest.TestCase):
         )
         article_artifact = next(item for item in task["artifacts"] if item["filename"] == "article.md")
         article = client.get(f"/artifacts/{article_artifact['id']}/download")
-        self.assertIn("页面正文内容", article.text)
+        self.assertIn("这是一个用于验证正文提取", article.text)
         summary = task["result"]["summary"]
         self.assertEqual(summary["kind"], "web_digest")
-        self.assertEqual(summary["words"], 6)
+        self.assertGreaterEqual(summary["words"], 20)
         self.assertEqual(summary["extraction"], "readability")
         self.assertTrue(summary["full_page"])
         self.assertTrue(sandbox.last_full_page)
 
+    def test_web_digest_extracts_listing_items_as_table(self) -> None:
+        """列表页应识别重复条目，产出表格正文、JSON 和 CSV，而不是整页快照文本。"""
+        sandbox = TemplateSandbox(
+            items=(
+                {"title": "A Light in the Attic", "price": "£51.77", "stock": "In stock", "rating": "Three",
+                 "link": "https://example.com/a", "image": "https://example.com/a.jpg"},
+                {"title": "Tipping the Velvet", "price": "£53.74", "stock": "In stock", "rating": "One",
+                 "link": "https://example.com/b", "image": "https://example.com/b.jpg"},
+                {"title": "Soumission", "price": "£50.10", "stock": "In stock", "rating": "One",
+                 "link": "https://example.com/c", "image": "https://example.com/c.jpg"},
+            )
+        )
+        client = self.create_client(sandbox)
+        created = client.post(
+            "/tasks",
+            json={"task_type": "WEB_DIGEST", "params": {"url": "https://example.com"}},
+        )
+        task = client.get(f"/tasks/{created.json()['id']}").json()
+        self.assertEqual(task["status"], "SUCCESS")
+        self.assertEqual(
+            [artifact["filename"] for artifact in task["artifacts"]],
+            ["article.md", "items.json", "items.csv", "screenshot.png", "web-digest.json"],
+        )
+        summary = task["result"]["summary"]
+        self.assertEqual(summary["item_count"], 3)
+        self.assertEqual(summary["extraction"], "structured")
+        article = client.get(
+            f"/artifacts/{next(a['id'] for a in task['artifacts'] if a['filename'] == 'article.md')}/download"
+        ).text
+        self.assertIn("| # | 标题 | 价格 | 库存 | 评分 |", article)
+        self.assertIn("[A Light in the Attic](https://example.com/a)", article)
+        csv_text = client.get(
+            f"/artifacts/{next(a['id'] for a in task['artifacts'] if a['filename'] == 'items.csv')}/download"
+        ).text
+        self.assertIn("title,price,stock,rating,link,image", csv_text)
+        report = self.artifact_json(client, task, "web-digest.json")
+        self.assertEqual(report["structured"]["count"], 3)
+        self.assertEqual(report["crawler"]["items"], 3)
+
+    def test_web_digest_accepts_scheme_less_url_and_absolutizes_links(self) -> None:
+        """省略协议头时按 https 处理，正文相对链接补成绝对地址。"""
+        sandbox = TemplateSandbox(
+            page_text="[下一章](chapter2.html) 这是一个用于验证相对链接补全的示例正文，长度足够通过正文检查。"
+        )
+        client = self.create_client(sandbox)
+        created = client.post(
+            "/tasks",
+            json={"task_type": "WEB_DIGEST", "params": {"url": "example.com"}},
+        )
+        task = client.get(f"/tasks/{created.json()['id']}").json()
+        self.assertEqual(task["status"], "SUCCESS")
+        self.assertEqual(sandbox.navigated, ["https://example.com"])
+        article_artifact = next(item for item in task["artifacts"] if item["filename"] == "article.md")
+        article = client.get(f"/artifacts/{article_artifact['id']}/download").text
+        self.assertIn("> 来源：https://example.com", article)
+        self.assertIn("https://example.com/chapter2.html", article)
+
     def test_web_digest_falls_back_to_visible_text(self) -> None:
         """Readability 提不到正文时退回可见文本，产物仍然完整。"""
-        sandbox = TemplateSandbox(page_text="仅可见文本")
+        sandbox = TemplateSandbox(page_text="这是可见文本回退时的正文，长度足以通过最少的正文检查。")
         sandbox.get_page_markdown = lambda: {
             "success": True,
             "data": {"title": sandbox.title, "markdown": ""},
@@ -587,6 +657,19 @@ class TemplateTests(unittest.TestCase):
         task = client.get(f"/tasks/{created.json()['id']}").json()
         self.assertEqual(task["status"], "SUCCESS")
         self.assertEqual(task["result"]["summary"]["extraction"], "text")
+
+    def test_web_digest_marks_image_only_page_as_content_empty(self) -> None:
+        """只剩图片链接的脚本页面应判为正文过少，而不是产出一份空报告。"""
+        sandbox = TemplateSandbox(page_text="![](https://example.com/logo.png)")
+        client = self.create_client(sandbox)
+        created = client.post(
+            "/tasks",
+            json={"task_type": "WEB_DIGEST", "params": {"url": "https://example.com"}},
+        )
+        task = client.get(f"/tasks/{created.json()['id']}").json()
+        self.assertEqual(task["status"], "FAILED")
+        self.assertEqual(task["error_code"], "CONTENT_EMPTY")
+        self.assertIn("正文过少", task["error_message"])
 
     def test_web_digest_empty_text_marks_task_failed(self) -> None:
         client = self.create_client(TemplateSandbox(page_text=""))

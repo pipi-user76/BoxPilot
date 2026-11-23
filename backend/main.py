@@ -16,7 +16,8 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
-from backend.db import InMemoryTaskStore, TaskStore
+from backend.db import TaskStore
+from backend.sqlite_store import SQLiteTaskStore
 from backend.logging_config import configure_logging
 from backend.models import HealthResponse, TaskType
 from backend.routes_csv import router as csv_router
@@ -41,12 +42,13 @@ class UTF8JSONResponse(JSONResponse):
 def create_app(
     *,
     task_store: TaskStore | None = None,
+    database_path: Path | None = None,
     artifact_store: ArtifactStore | None = None,
     adapter: SandboxAdapter | None = None,
     templates: Iterable[tuple[TaskType, TaskTemplate]] | None = None,
 ) -> FastAPI:
     # 所有依赖都允许从参数注入：生产环境使用真实实现，单元测试使用轻量替身。
-    selected_store = task_store or InMemoryTaskStore()
+    selected_store = task_store if task_store is not None else SQLiteTaskStore(database_path or settings.DATABASE_PATH)
     selected_adapter = adapter or sandbox_adapter
     selected_artifacts = artifact_store or ArtifactStore(
         Path(settings.ARTIFACT_ROOT),
@@ -65,6 +67,9 @@ def create_app(
     async def lifespan(app: FastAPI):
         # 启动时准备产物根目录，并把共享对象放入 app.state，避免路由自行创建全局状态。
         configure_logging()
+        if isinstance(selected_store, SQLiteTaskStore):
+            selected_store.init_db()
+            selected_store.recover_interrupted()
         selected_artifacts.root.mkdir(parents=True, exist_ok=True)
         app.state.task_store = selected_store
         app.state.artifact_store = selected_artifacts
@@ -134,7 +139,7 @@ def create_app(
         sandbox = request.app.state.sandbox_adapter
         sandbox_status = sandbox.health()
         overall = "ok" if sandbox_status["success"] else "degraded"
-        return HealthResponse(status=overall, app=settings.PROJECT_VERSION, sandbox=sandbox_status, store="memory")
+        return HealthResponse(status=overall, app=settings.PROJECT_VERSION, sandbox=sandbox_status, store=getattr(selected_store, "name", "custom"))
 
     return app
 

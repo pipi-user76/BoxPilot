@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BoxPilot 任务工作台</title>
-  <link rel="stylesheet" href="styles.css?v=20261112-2">
+  <link rel="stylesheet" href="styles.css?v=20261123-2">
 </head>
 <body>
   <header class="app-header">
@@ -78,15 +78,16 @@
           </div>
         </div>
 
-        <!-- 选中任务后才显示批量操作，避免空状态占用版面。 -->
-        <div id="selection-bar" class="selection-bar" hidden>
+        <!-- 批量操作条常驻显示，未选中时按钮禁用，避免用户找不到入口。 -->
+        <div id="selection-bar" class="selection-bar">
           <label class="checkbox-inline">
             <input id="select-page" type="checkbox">
             <span>全选本页</span>
           </label>
           <span id="selection-count">已选 0 项</span>
           <div class="selection-actions">
-            <button id="batch-delete" class="button danger" type="button">批量删除</button>
+            <button id="download-selected" class="button secondary" type="button" disabled>下载所选</button>
+            <button id="batch-delete" class="button danger" type="button" disabled>批量删除</button>
             <button id="cleanup" class="button secondary" type="button">清理 7 天前记录</button>
           </div>
         </div>
@@ -130,6 +131,6 @@
     </div>
   </dialog>
 
-  <script src="task_list.js?v=20261112-2"></script>
+  <script src="task_list.js?v=20261123-2"></script>
 </body>
 </html>

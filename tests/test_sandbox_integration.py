@@ -18,7 +18,7 @@ class SandboxIntegrationTests(unittest.TestCase):
         self.assertTrue(adapter.write_text_file("integration-task", "check.txt", "ok")["success"])
         self.assertEqual(adapter.read_text_file("integration-task", "check.txt")["data"]["content"], "ok")
         self.assertTrue(adapter.exec_shell("printf 'ok'", task_id="integration-task", timeout_s=20)["success"])
-        self.assertTrue(adapter.navigate("http://127.0.0.1:8080", timeout_s=20)["success"])
+        self.assertTrue(adapter.navigate("https://example.com/", timeout_s=20)["success"])
 
 
 if __name__ == "__main__":

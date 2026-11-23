@@ -49,8 +49,10 @@ const stepDisplayNames = {
   write_check_report: "生成检查报告",
 };
 
+const initialParams = new URLSearchParams(window.location.search);
+
 const state = {
-  q: "",
+  q: initialParams.get("q") || "",
   status: "",
   page: 1,
   pageSize: 20,
@@ -60,7 +62,7 @@ const state = {
   selected: new Set(),
 };
 
-let selectedTaskId = new URLSearchParams(window.location.search).get("task");
+let selectedTaskId = initialParams.get("task");
 let refreshTimer = null;
 let searchTimer = null;
 
@@ -77,6 +79,7 @@ const elements = {
   selectionBar: document.querySelector("#selection-bar"),
   selectionCount: document.querySelector("#selection-count"),
   selectPage: document.querySelector("#select-page"),
+  downloadSelected: document.querySelector("#download-selected"),
   batchDelete: document.querySelector("#batch-delete"),
   cleanup: document.querySelector("#cleanup"),
   pagePrev: document.querySelector("#page-prev"),
@@ -118,6 +121,29 @@ function formatSize(bytes) {
 
 function shortId(taskId) {
   return `#${taskId.slice(0, 8)}`;
+}
+
+// 与后端 naming.py 保持一致：列表和详情都显示“类型 · 目标”，短 ID 退到副标题。
+function targetLabel(task) {
+  const params = task.params || {};
+  if (task.task_type === "WEB_DIGEST" || task.task_type === "WEB_ACCEPTANCE") {
+    const raw = String(params.url || "");
+    try {
+      return new URL(raw.includes("//") ? raw : `https://${raw}`).host || raw;
+    } catch {
+      return raw || "网页";
+    }
+  }
+  if (task.task_type === "REPO_CHECK") {
+    const repo = String(params.repo_url || "").replace(/\/+$/, "");
+    return repo.split("/").pop()?.replace(/\.git$/, "") || "代码仓库";
+  }
+  if (task.task_type === "CSV_ANALYSIS") return params.filename || "数据文件";
+  return "任务";
+}
+
+function batchName(task) {
+  return String(task.params?._batch_name || "").trim();
 }
 
 async function api(url, options = {}) {
@@ -182,8 +208,13 @@ function renderRow(task) {
   main.type = "button";
   const name = element("div", "task-name");
   const attemptText = task.attempt > 1 ? ` · 第 ${task.attempt} 次尝试` : "";
+  const nameLine = element("div", "task-title");
+  nameLine.append(
+    element("strong", "", `${taskTypeLabels[task.task_type] || task.task_type} · ${targetLabel(task)}`),
+  );
+  if (batchName(task)) nameLine.append(element("span", "batch-chip", batchName(task)));
   name.append(
-    element("strong", "", taskTypeLabels[task.task_type] || task.task_type),
+    nameLine,
     element("span", "task-meta", `${shortId(task.id)} · ${task.steps.length} 个步骤${attemptText}`),
   );
 
@@ -224,10 +255,13 @@ function updateSelectionBar() {
   const pageIds = state.items.map((task) => task.id);
   const selectedOnPage = pageIds.filter((id) => state.selected.has(id)).length;
 
-  elements.selectionBar.hidden = state.selected.size === 0 && selectedOnPage === 0;
   elements.selectionCount.textContent = `已选 ${state.selected.size} 项`;
   elements.selectPage.checked = pageIds.length > 0 && selectedOnPage === pageIds.length;
   elements.selectPage.indeterminate = selectedOnPage > 0 && selectedOnPage < pageIds.length;
+  elements.selectPage.disabled = pageIds.length === 0;
+  // 批量按钮随选中数量启用，避免空选时点击后只得到一条报错。
+  elements.batchDelete.disabled = state.selected.size === 0;
+  elements.downloadSelected.disabled = state.selected.size === 0;
 }
 
 function renderPagination() {
@@ -297,13 +331,21 @@ function renderResultSummary(task) {
       resultGridItem("缺失值", summary.missing_values),
     );
   } else if (summary.kind === "web_digest") {
+    const extractionLabels = {
+      structured: "结构化条目抽取",
+      text: "纯文本回退",
+      readability: "Readability 去噪",
+    };
     grid.append(
       resultGridItem("页面标题", summary.title || "未获取"),
-      resultGridItem("正文提取", summary.extraction === "text" ? "纯文本回退" : "Readability 去噪"),
+      resultGridItem("正文提取", extractionLabels[summary.extraction] || "Readability 去噪"),
       resultGridItem("正文词数", `${summary.words ?? 0} 词`),
       resultGridItem("预计阅读", `${summary.reading_time_minutes ?? 1} 分钟`),
       resultGridItem("页面状态", summary.http_status ? `HTTP ${summary.http_status}` : "未获取"),
     );
+    if (summary.item_count) {
+      grid.append(resultGridItem("识别条目", `${summary.item_count} 条`));
+    }
   } else if (summary.kind === "repo_check") {
     const toolchainLabels = {
       python: "Python 项目",
@@ -350,7 +392,8 @@ function renderDetail(task) {
   const headingText = element("div");
   headingText.append(
     element("p", "product-mark", taskTypeLabels[task.task_type] || task.task_type),
-    element("h2", "", `任务 ${task.id.slice(0, 8)}`),
+    element("h2", "", `${taskTypeLabels[task.task_type] || task.task_type} · ${targetLabel(task)}`),
+    element("p", "detail-id", `任务 ${shortId(task.id)}`),
   );
   const badge = element("span", "status-badge", statusLabels[task.status] || task.status);
   badge.dataset.status = task.status;
@@ -365,12 +408,16 @@ function renderDetail(task) {
     element("span", "", `尝试次数：${task.attempt ?? 1}`),
   );
   if (task.retry_of) meta.append(element("span", "", `重试自：${shortId(task.retry_of)}`));
+  if (batchName(task)) meta.append(element("span", "", `批次：${batchName(task)}`));
 
   const detailActions = element("div", "detail-actions");
   if (task.status === "PENDING" || task.status === "RUNNING") {
     detailActions.append(actionButton("取消任务", "danger", () => requestCancel(task)));
   } else if (retryableStatuses.has(task.status)) {
     detailActions.append(actionButton("重试任务", "secondary", () => requestRetry(task)));
+  }
+  if (task.params?._batch_id) {
+    detailActions.append(actionButton("重跑本批", "secondary", () => rerunBatch(task)));
   }
 
   content.append(heading, meta, detailActions);
@@ -402,7 +449,15 @@ function renderDetail(task) {
   content.append(stepsSection);
 
   const artifactsSection = element("section", "detail-section");
-  artifactsSection.append(element("h3", "", "任务产物"));
+  const artifactsHeader = element("div", "section-header");
+  artifactsHeader.append(element("h3", "", "任务产物"));
+  if (task.artifacts.length) {
+    const downloadAll = element("a", "button secondary small", "下载全部");
+    downloadAll.href = `/tasks/${encodeURIComponent(task.id)}/artifacts/archive`;
+    downloadAll.setAttribute("download", "");
+    artifactsHeader.append(downloadAll);
+  }
+  artifactsSection.append(artifactsHeader);
   const artifacts = element("ul", "artifact-list");
   task.artifacts.forEach((artifact) => artifacts.append(renderArtifact(artifact)));
   if (!task.artifacts.length) artifacts.append(element("li", "step-item", "暂无产物"));
@@ -503,6 +558,37 @@ async function requestRetry(task) {
   await refresh();
 }
 
+async function rerunBatch(task) {
+  const name = batchName(task) || "当前批次";
+  if (!window.confirm(`重跑“${name}”？\n会按原地址重新创建一批任务，历史记录保留。`)) return;
+  try {
+    const params = new URLSearchParams({
+      q: String(task.params._batch_id || ""),
+      page_size: "100",
+    });
+    const listed = await api(`/tasks?${params.toString()}`);
+    const targets = [
+      ...new Set(
+        listed.items
+          .map((item) => item.params?.repo_url || item.params?.url)
+          .filter(Boolean),
+      ),
+    ];
+    if (!targets.length) throw new Error("批次里没有可重跑的地址");
+    const created = await api("/tasks/batch", {
+      method: "POST",
+      body: JSON.stringify({
+        task_type: task.task_type,
+        targets,
+        batch_name: batchName(task),
+      }),
+    });
+    window.location.assign(`task_list.html?q=${encodeURIComponent(created.batch_id)}`);
+  } catch (error) {
+    elements.lastUpdated.textContent = error.message;
+  }
+}
+
 async function batchDelete() {
   const ids = [...state.selected];
   if (!ids.length) return;
@@ -580,6 +666,8 @@ async function refreshHealth() {
 }
 
 elements.refresh.addEventListener("click", () => refresh());
+// 从批量创建页跳转过来时，搜索框直接带入批次号，用户能看到刚提交的一批任务。
+elements.search.value = state.q;
 elements.search.addEventListener("input", () => {
   window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => {
@@ -613,6 +701,11 @@ elements.selectPage.addEventListener("change", () => {
   renderTaskList();
 });
 elements.batchDelete.addEventListener("click", batchDelete);
+elements.downloadSelected.addEventListener("click", () => {
+  const ids = [...state.selected];
+  if (!ids.length) return;
+  window.location.href = `/tasks/artifacts/archive?task_ids=${encodeURIComponent(ids.join(","))}`;
+});
 elements.cleanup.addEventListener("click", cleanupHistory);
 elements.previewClose.addEventListener("click", () => elements.previewDialog.close());
 elements.previewDialog.addEventListener("click", (event) => {

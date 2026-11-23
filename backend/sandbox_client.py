@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import time
@@ -210,6 +211,27 @@ class SandboxAdapter:
                 if body.strip():
                     markdown = body.strip()
             return {"success": True, "data": {"title": title, "markdown": markdown}, "error": None}
+        except Exception as exc:
+            return self._exception_failure(exc)
+
+    def evaluate(self, expression: str) -> dict[str, Any]:
+        """在页面上下文执行一段 JS，返回 JSON 解析后的结果。
+
+        用于结构化抽取：把页面里重复的条目块读成数组，而不是只拿整页文本。
+        """
+        try:
+            response = self.client.browser_page.evaluate(expression=expression)
+            if not response.success:
+                return self._failure("COMMAND_FAILED", response.message or "page evaluate failed")
+            raw = response.data
+            if isinstance(raw, (dict, list)):
+                return {"success": True, "data": raw, "error": None}
+            text = str(raw or "").strip()
+            try:
+                value = json.loads(text) if text else None
+            except json.JSONDecodeError:
+                value = text
+            return {"success": True, "data": value, "error": None}
         except Exception as exc:
             return self._exception_failure(exc)
 

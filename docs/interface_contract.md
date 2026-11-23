@@ -119,6 +119,20 @@ purge_tasks(statuses, older_than) -> list[str]
 
 限流：`POST /tasks` 与 `POST /tasks/csv` 按来源 IP 限制为 `RATE_LIMIT_PER_MINUTE`（默认 20）次每分钟，超限返回 `429 RATE_LIMITED`，并带 `Retry-After` 秒数。
 
+### POST /tasks/batch
+
+批量订阅，一次最多 20 个地址：
+
+```json
+{
+  "task_type": "WEB_DIGEST",
+  "targets": ["https://books.toscrape.com", "https://quotes.toscrape.com"],
+  "batch_name": "每周巡检"
+}
+```
+
+返回 `202` 与 `{batch_id, batch_name, created, deduplicated, items}`。`items` 逐项给出 `target`、`task_id`、`deduplicated`。每个任务参数中写入 `_batch_id` 与 `_batch_name`，这两个键不参与幂等计算；同一地址在窗口内重复提交仍返回原任务。
+
 ### POST /tasks/csv
 
 使用 `multipart/form-data` 接收 `file`。当前限制：
@@ -142,7 +156,9 @@ purge_tasks(statuses, older_than) -> list[str]
 | `POST` | `/tasks/batch-delete` | `{task_ids}` → `{deleted,skipped}` |
 | `POST` | `/tasks/cleanup` | `{statuses,older_than_days}` → `{deleted,skipped}` |
 | `GET` | `/tasks/{task_id}/artifacts` | 产物清单 |
-| `GET` | `/artifacts/{artifact_id}/download` | 文件流，`?inline=1` 内联显示 |
+| `GET` | `/tasks/{task_id}/artifacts/archive` | 单任务 zip，文件名 `类型_目标_时间_短ID.zip`，包内文件带同一前缀 |
+| `GET` | `/tasks/artifacts/archive?task_ids=a,b` | 批量 zip（最多 50 个），按任务规范名分目录；空列表 422，超限 422 |
+| `GET` | `/artifacts/{artifact_id}/download` | 文件流，附件名带任务前缀；`?inline=1` 内联显示 |
 | `GET` | `/artifacts/{artifact_id}/preview` | `{kind,text,truncated,url,...}` |
 | `GET` | `/health` | 应用与沙箱健康状态 |
 
@@ -152,6 +168,7 @@ purge_tasks(statuses, older_than) -> list[str]
 - 取消已结束任务返回 `409 TASK_NOT_CANCELLABLE`；重试不可重试状态返回 `409 TASK_NOT_RETRYABLE`；CSV 重试缺少 `input.csv` 返回 `409 INPUT_NOT_FOUND`。
 - `batch-delete` 与 `cleanup` 跳过或拒绝活动任务（`PENDING`、`RUNNING`），删除记录时同步删除产物目录。
 - 预览文本上限 `PREVIEW_TEXT_LIMIT`（默认 200000 字符）；图片返回带 `?inline=1` 的下载地址；其他类型提示下载。
+- 命名规则集中在 `backend/naming.py`：`task_stem()` 生成 `类型_目标_时间_短ID`（时间按本地时区），单任务包内文件加该前缀，批量包用它做目录名。
 
 错误体统一为：
 
@@ -226,7 +243,7 @@ TaskType.WEB_ACCEPTANCE: WebAcceptanceTemplate(...)
 当前已实现并注册：
 
 - `CSV_ANALYSIS`：必须通过 `POST /tasks/csv` 上传，生成 `summary.json` 和中文 `report.md`；`summary` 含行数、列数、重复行、缺失值、完整度。
-- `WEB_DIGEST`：参数 `url`，用 Readability 提取正文、截整页图，生成 `article.md`、`screenshot.png` 和 `web-digest.json`；`web-digest.json` 的 `content` 含字符数、词数、预计阅读分钟、标题数、链接数、图片数，`summary` 含 `words`、`reading_time_minutes`、`extraction`、`full_page`、`screenshot_bytes`。
+- `WEB_DIGEST`：参数 `url`，先做公网地址校验，再打开页面。页面里存在 3 条以上“重复、带链接、带价格”的条目块时进入结构化模式，产出 `article.md`（条目表）、`items.json`、`items.csv`，`web-digest.json` 的 `structured` 记录条目数、选择器和字段；否则用 Readability 提取正文，退化为普通文章模式。两种模式都截整页图，报告含 `crawler`（引擎、抓取时间、最终地址、状态码、加载耗时）与 `content`（字符数、词数、预计阅读分钟、标题数、链接数、图片数），`summary` 含 `words`、`reading_time_minutes`、`extraction`、`full_page`、`screenshot_bytes`、`item_count`。
 - `REPO_CHECK`：参数 `repo_url`，必须是 `TRUSTED_GIT_HOSTS` 内的 HTTPS 仓库；`install_deps` 默认 `true`（界面不再暴露开关，传 `false` 可跳过安装，只做浅层检查）。执行“准备测试环境”步骤：用 uv 在任务目录建 `.venv`，按仓库 `requires-python` 从 3.13、3.12、3.11、3.10 中选可用解释器；镜像里没有所需版本时，先用 `uv python install` 补装（解释器源由 `UV_PYTHON_INSTALL_MIRROR` 控制，默认 npmmirror），补装失败再回退到降级策略。随后安装声明依赖，补 pytest，并尝试 `uv pip install --no-deps -e .`。沙箱缺少满足要求的解释器时，`allow_version_mismatch`（默认 `true`）允许降一档试跑并在报告标注 `version_relaxed`，设为 `false` 则直接给出版本不匹配结论。超时由 `REPO_INSTALL_TIMEOUT_SECONDS`、`REPO_PYTHON_INSTALL_TIMEOUT_SECONDS` 控制，包源和解释器源分别由 `UV_INDEX_URL`、`UV_PYTHON_INSTALL_MIRROR` 覆盖。安装结果写入沙箱内的 `install-result.json`；安装失败时才额外保留 `install.log`。离线演示使用 `demo://python`，生成 `check-report.md`、`check-report.json` 与 `test.log`；克隆重试过才有 `clone.log`。报告中的 `test_status` 取 `passed`、`failed`、`not_run`、`error`：版本不满足、依赖装不上、缺 pytest 都记为 `error` 并在 `test_note` 说明；没有可运行用例记为 `not_run`。
 - `WEB_ACCEPTANCE`：参数 `url`、`expected_title`，生成 `acceptance.json` 和 `page.png`。
 
@@ -265,3 +282,5 @@ TaskType.WEB_ACCEPTANCE: WebAcceptanceTemplate(...)
 1. SQLite 版 `TaskStore`，保持第 3 节方法签名。
 2. `scripts/init_db.py` 建表（tasks、steps、artifacts、可选 task_events）和重复执行测试。
 3. 将内存任务、步骤和产物记录迁移到 SQLite，保证服务重启后仍可查询。
+
+> 集成版现状见 [SQLite 集成与验收](sqlite_integration.md)。默认存储已改为 SQLite，使用任务、步骤和产物三张表，保留内存实现用于测试。此契约中的字段是 API 模型语义，SQLite 物理结构由 `backend/sqlite_store.py` 定义。

@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import io
 import unittest
+import zipfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -41,7 +43,7 @@ class ApiTests(unittest.TestCase):
         # 每个测试使用独立临时目录，避免产物或任务状态互相影响。
         self.temp_dir = make_temp_dir()
         artifact_store = ArtifactStore(self.temp_dir)
-        self.client_context = TestClient(create_app(artifact_store=artifact_store, adapter=FakeSandbox()))
+        self.client_context = TestClient(create_app(database_path=self.temp_dir / "tasks.db", artifact_store=artifact_store, adapter=FakeSandbox()))
         self.client = self.client_context.__enter__()
 
     def tearDown(self) -> None:
@@ -69,6 +71,79 @@ class ApiTests(unittest.TestCase):
         downloaded = self.client.get(f"/artifacts/{artifact_id}/download")
         self.assertEqual(downloaded.status_code, 200)
         self.assertIn("BoxPilot scheduler smoke test", downloaded.text)
+
+    def test_archive_downloads_single_and_multiple_tasks(self) -> None:
+        """单任务与批量下载都应返回包含产物的 zip 包。"""
+        first = self.client.post("/tasks", json={"task_type": "MOCK", "params": {}}).json()["id"]
+        # 第二个任务换一个参数，避免命中五分钟幂等而返回同一个任务。
+        second = self.client.post(
+            "/tasks", json={"task_type": "MOCK", "params": {"tag": "second"}}
+        ).json()["id"]
+
+        single = self.client.get(f"/tasks/{first}/artifacts/archive")
+        self.assertEqual(single.status_code, 200)
+        self.assertEqual(single.headers["content-type"], "application/zip")
+        self.assertIn("attachment; filename=", single.headers["content-disposition"])
+        with zipfile.ZipFile(io.BytesIO(single.content)) as archive:
+            names = archive.namelist()
+        # 单任务包里的文件带任务前缀，避免不同任务的同名产物互相覆盖。
+        self.assertEqual(len(names), 1)
+        self.assertTrue(names[0].startswith("mock_task_"), names[0])
+        self.assertTrue(names[0].endswith("_mock-result.txt"), names[0])
+
+        batch = self.client.get(f"/tasks/artifacts/archive?task_ids={first},{second}")
+        self.assertEqual(batch.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(batch.content)) as archive:
+            names = archive.namelist()
+        self.assertEqual(len(names), 2)
+        for name in names:
+            self.assertTrue(name.startswith("mock_task_"), name)
+            self.assertTrue(name.endswith("/mock-result.txt"), name)
+
+    def test_batch_create_subscribes_multiple_targets(self) -> None:
+        """批量订阅一次创建多个任务，并共享同一个批次号与批次名。"""
+        payload = {
+            "task_type": "MOCK",
+            "targets": ["https://a.example.com", "https://b.example.com"],
+            "batch_name": "每周检查",
+        }
+        response = self.client.post("/tasks/batch", json=payload)
+        self.assertEqual(response.status_code, 202)
+        body = response.json()
+        self.assertEqual(body["created"], 2)
+        self.assertEqual(body["deduplicated"], 0)
+        self.assertEqual(body["batch_name"], "每周检查")
+        self.assertEqual(len(body["items"]), 2)
+
+        task = self.client.get(f"/tasks/{body['items'][0]['task_id']}").json()
+        self.assertEqual(task["params"]["_batch_id"], body["batch_id"])
+        self.assertEqual(task["params"]["_batch_name"], "每周检查")
+
+        listed = self.client.get(f"/tasks?q={body['batch_id']}&page_size=50").json()
+        self.assertEqual(listed["total"], 2)
+
+        # 五分钟内重复提交同一批地址应命中幂等，不重复执行。
+        again = self.client.post("/tasks/batch", json=payload).json()
+        self.assertEqual(again["created"], 0)
+        self.assertEqual(again["deduplicated"], 2)
+
+    def test_batch_create_rejects_empty_targets(self) -> None:
+        response = self.client.post(
+            "/tasks/batch",
+            json={"task_type": "MOCK", "targets": ["  ", ""], "batch_name": ""},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"]["code"], "VALIDATION_ERROR")
+
+    def test_archive_without_artifacts_returns_404(self) -> None:
+        """没有产物的任务不应返回空压缩包。"""
+        created = self.client.post(
+            "/tasks",
+            json={"task_type": "WEB_DIGEST", "params": {"url": "https://example.com"}},
+        )
+        response = self.client.get(f"/tasks/{created.json()['id']}/artifacts/archive")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"]["code"], "NO_ARTIFACTS")
 
     def test_frontend_is_served_from_new_framework(self) -> None:
         """确认根路径跳转和前台静态文件都来自新 backend/frontend 框架。"""
