@@ -47,6 +47,7 @@ async def create_csv_task(
     store = request.app.state.task_store
     artifact_store: ArtifactStore = request.app.state.artifact_store
     runner: TaskRunner = request.app.state.task_runner
+    user = request.state.user
 
     # CSV 的内容不在参数里，用文件摘要参与幂等键，避免同名不同内容被误判为重复。
     digest = hashlib.sha256(content).hexdigest()
@@ -57,6 +58,7 @@ async def create_csv_task(
     task = store.create_task(
         TaskType.CSV_ANALYSIS,
         {"source_filename": original_name, "csv_filename": "input.csv"},
+        owner_id=user.id,
         dedupe_key=dedupe_key,
         dedupe_since=utc_now() - timedelta(seconds=settings.DEDUPE_WINDOW_SECONDS),
     )

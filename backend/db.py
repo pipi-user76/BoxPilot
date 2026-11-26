@@ -19,11 +19,12 @@ class TaskStore(Protocol):
         *,
         attempt: int = 1,
         retry_of: str | None = None,
+        owner_id: str | None = None,
         dedupe_key: str | None = None,
         dedupe_since: datetime | None = None,
     ) -> TaskRecord: ...
 
-    def find_by_dedupe(self, dedupe_key: str, since: datetime) -> TaskRecord | None: ...
+    def find_by_dedupe(self, dedupe_key: str, since: datetime, owner_id: str | None = None) -> TaskRecord | None: ...
 
     def get_task(self, task_id: str) -> TaskRecord | None: ...
 
@@ -35,13 +36,16 @@ class TaskStore(Protocol):
         task_type: TaskType | None = None,
         page: int = 1,
         page_size: int = 20,
+        owner_id: str | None = None,
     ) -> tuple[list[TaskRecord], int]: ...
 
-    def count_tasks(self) -> dict[str, int]: ...
+    def count_tasks(self, owner_id: str | None = None) -> dict[str, int]: ...
 
     def delete_task(self, task_id: str) -> bool: ...
 
-    def purge_tasks(self, statuses: list[TaskStatus], older_than: datetime) -> list[str]: ...
+    def purge_tasks(
+        self, statuses: list[TaskStatus], older_than: datetime, owner_id: str | None = None
+    ) -> list[str]: ...
 
     def start_task(self, task_id: str) -> TaskRecord: ...
 
@@ -88,6 +92,7 @@ class InMemoryTaskStore:
         *,
         attempt: int = 1,
         retry_of: str | None = None,
+        owner_id: str | None = None,
         dedupe_key: str | None = None,
         dedupe_since: datetime | None = None,
     ) -> TaskRecord:
@@ -97,17 +102,20 @@ class InMemoryTaskStore:
             params=params,
             attempt=attempt,
             retry_of=retry_of,
+            owner_id=owner_id,
             dedupe_key=dedupe_key,
         )
         with self._lock:
             if dedupe_key and dedupe_since is not None:
-                existing = self.find_by_dedupe(dedupe_key, dedupe_since)
+                existing = self.find_by_dedupe(dedupe_key, dedupe_since, owner_id)
                 if existing is not None:
                     return existing.model_copy(update={"deduplicated": True})
             self._tasks[task.id] = task
         return task.model_copy(deep=True)
 
-    def find_by_dedupe(self, dedupe_key: str, since: datetime) -> TaskRecord | None:
+    def find_by_dedupe(
+        self, dedupe_key: str, since: datetime, owner_id: str | None = None
+    ) -> TaskRecord | None:
         """返回窗口内同键的最近任务；失败任务不参与去重，允许用户重跑。"""
         if not dedupe_key:
             return None
@@ -116,6 +124,7 @@ class InMemoryTaskStore:
                 task
                 for task in self._tasks.values()
                 if task.dedupe_key == dedupe_key
+                and task.owner_id == owner_id
                 and task.created_at >= since
                 and task.status not in {TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.TIMEOUT}
             ]
@@ -137,21 +146,28 @@ class InMemoryTaskStore:
         task_type: TaskType | None = None,
         page: int = 1,
         page_size: int = 20,
+        owner_id: str | None = None,
     ) -> tuple[list[TaskRecord], int]:
         """按筛选条件返回当前页和命中总数；搜索覆盖任务 ID、类型、参数和错误信息。"""
         with self._lock:
-            matched = [task for task in self._tasks.values() if self._matches(task, query, statuses, task_type)]
+            matched = [
+                task
+                for task in self._tasks.values()
+                if (owner_id is None or task.owner_id == owner_id)
+                and self._matches(task, query, statuses, task_type)
+            ]
             matched.sort(key=lambda item: item.created_at, reverse=True)
             start = (page - 1) * page_size
             visible = matched[start : start + page_size]
             return [task.model_copy(deep=True) for task in visible], len(matched)
 
-    def count_tasks(self) -> dict[str, int]:
-        """统计全部任务的状态分布，供列表页概览使用。"""
+    def count_tasks(self, owner_id: str | None = None) -> dict[str, int]:
+        """统计任务状态分布，供列表页概览使用；普通用户只统计自己的任务。"""
         with self._lock:
+            tasks = [task for task in self._tasks.values() if owner_id is None or task.owner_id == owner_id]
             counts = {status.value: 0 for status in TaskStatus}
-            counts["total"] = len(self._tasks)
-            for task in self._tasks.values():
+            counts["total"] = len(tasks)
+            for task in tasks:
                 counts[task.status.value] += 1
             return counts
 
@@ -165,14 +181,18 @@ class InMemoryTaskStore:
                 self._artifacts.pop(artifact.id, None)
             return True
 
-    def purge_tasks(self, statuses: list[TaskStatus], older_than: datetime) -> list[str]:
+    def purge_tasks(
+        self, statuses: list[TaskStatus], older_than: datetime, owner_id: str | None = None
+    ) -> list[str]:
         """删除指定状态且创建时间早于截止时间的任务，返回被删除的任务 ID。"""
         allowed = set(statuses)
         with self._lock:
             targets = [
                 task.id
                 for task in self._tasks.values()
-                if task.status in allowed and task.created_at < older_than
+                if task.status in allowed
+                and task.created_at < older_than
+                and (owner_id is None or task.owner_id == owner_id)
             ]
             for task_id in targets:
                 self.delete_task(task_id)

@@ -128,6 +128,7 @@ class ApiSecurityTests(unittest.TestCase):
             task_store=self.store,
             artifact_store=ArtifactStore(Path(self.temp_dir), max_bytes=1024 * 1024),
             adapter=FakeSandbox(),
+            auth_required=False,
         )
         self.client = TestClient(self.app)
         # 进入上下文才会触发 lifespan，把 task_runner / stores 挂到 app.state。

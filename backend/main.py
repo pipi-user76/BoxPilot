@@ -8,18 +8,23 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import secrets
 import time
 from typing import Iterable
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.auth import SESSION_COOKIE, read_session
+from backend.auth_store import AuthStore, InMemoryAuthStore, SQLiteAuthStore
 from backend.config import settings
 from backend.db import TaskStore
 from backend.sqlite_store import SQLiteTaskStore
 from backend.logging_config import configure_logging
-from backend.models import HealthResponse, TaskType
+from backend.models import HealthResponse, TaskType, UserRecord
+from backend.routes_auth import router as auth_router
 from backend.routes_csv import router as csv_router
 from backend.routes_tasks import router as tasks_router
 from backend.sandbox_client import SandboxAdapter, sandbox_adapter
@@ -45,10 +50,23 @@ def create_app(
     database_path: Path | None = None,
     artifact_store: ArtifactStore | None = None,
     adapter: SandboxAdapter | None = None,
+    auth_store: AuthStore | None = None,
+    auth_required: bool | None = None,
     templates: Iterable[tuple[TaskType, TaskTemplate]] | None = None,
 ) -> FastAPI:
     # 所有依赖都允许从参数注入：生产环境使用真实实现，单元测试使用轻量替身。
     selected_store = task_store if task_store is not None else SQLiteTaskStore(database_path or settings.DATABASE_PATH)
+    if auth_store is not None:
+        selected_auth = auth_store
+    elif isinstance(selected_store, SQLiteTaskStore):
+        selected_auth = SQLiteAuthStore(selected_store.path)
+    else:
+        selected_auth = InMemoryAuthStore()
+    enforce_auth = settings.AUTH_REQUIRED if auth_required is None else auth_required
+    # 关闭认证时（仅测试或本地单用户）给一个合成管理员，路由仍走同一套归属代码。
+    local_user = UserRecord(id="local", username="local", is_admin=True)
+    # 未显式配置时随机生成；重启即失效，生产环境应通过 SESSION_SECRET 固定。
+    session_secret = settings.SESSION_SECRET or secrets.token_urlsafe(32)
     selected_adapter = adapter or sandbox_adapter
     selected_artifacts = artifact_store or ArtifactStore(
         Path(settings.ARTIFACT_ROOT),
@@ -72,6 +90,10 @@ def create_app(
             selected_store.recover_interrupted()
         selected_artifacts.root.mkdir(parents=True, exist_ok=True)
         app.state.task_store = selected_store
+        app.state.auth_store = selected_auth
+        app.state.session_secret = session_secret
+        app.state.auth_required = enforce_auth
+        app.state.local_user = local_user
         app.state.artifact_store = selected_artifacts
         app.state.sandbox_adapter = selected_adapter
         app.state.task_runner = selected_runner
@@ -86,6 +108,9 @@ def create_app(
     )
     app.include_router(tasks_router)
     app.include_router(csv_router)
+    app.include_router(auth_router)
+    # 中间件可能早于 lifespan 读取，先在对象上放一份；lifespan 会覆盖为同一值。
+    app.state.session_secret = session_secret
     # 前端使用原生静态文件，不需要额外启动 Node 服务；访问 /ui 即可打开工作台。
     frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
     if frontend_dir.is_dir():
@@ -101,32 +126,75 @@ def create_app(
 
     # 仅限制“创建任务”的入口；列表轮询和健康检查不占用额度。
     _rate_buckets: dict[str, tuple[float, int]] = {}
+    _login_buckets: dict[str, tuple[float, int]] = {}
+
+    def _hit(key: str, buckets: dict[str, tuple[float, int]], limit: int) -> int | None:
+        """滑动一分钟计数；超限时返回需要等待的秒数。"""
+        now = time.monotonic()
+        window_start, count = buckets.get(key, (now, 0))
+        if now - window_start >= 60:
+            window_start, count = now, 0
+        count += 1
+        buckets[key] = (window_start, count)
+        if limit and count > limit:
+            return max(1, int(60 - (now - window_start)))
+        return None
 
     @app.middleware("http")
     async def rate_limit(request: Request, call_next):
-        if settings.RATE_LIMIT_PER_MINUTE > 0 and request.method == "POST" and request.url.path in {
-            "/tasks",
-            "/tasks/csv",
-        }:
-            client = request.client.host if request.client else "unknown"
-            now = time.monotonic()
-            window_start, count = _rate_buckets.get(client, (now, 0))
-            if now - window_start >= 60:
-                window_start, count = now, 0
-            count += 1
-            _rate_buckets[client] = (window_start, count)
-            if count > settings.RATE_LIMIT_PER_MINUTE:
-                retry_after = max(1, int(60 - (now - window_start)))
-                return UTF8JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": {
-                            "code": "RATE_LIMITED",
-                            "message": "请求过于频繁，请稍后再试",
-                        }
-                    },
-                    headers={"Retry-After": str(retry_after)},
-                )
+        client = request.client.host if request.client else "unknown"
+        retry_after = None
+        if request.method == "POST" and request.url.path in {"/tasks", "/tasks/csv"}:
+            retry_after = _hit(client, _rate_buckets, settings.RATE_LIMIT_PER_MINUTE)
+        elif request.method == "POST" and request.url.path == "/auth/login":
+            # 登录单独计数，避免影响正常创建任务的额度。
+            retry_after = _hit(f"login:{client}", _login_buckets, 10)
+        if retry_after is not None:
+            return UTF8JSONResponse(
+                status_code=429,
+                content={
+                    "detail": {
+                        "code": "RATE_LIMITED",
+                        "message": "请求过于频繁，请稍后再试",
+                    }
+                },
+                headers={"Retry-After": str(retry_after)},
+            )
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def require_auth(request: Request, call_next):
+        """登录校验放在最外层：未登录既看不到页面，也调不到任务接口。"""
+        path = request.url.path
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        if not enforce_auth:
+            request.state.user = local_user
+            return await call_next(request)
+        token = request.cookies.get(SESSION_COOKIE)
+        user_id = read_session(token, session_secret)
+        user = selected_auth.get_user(user_id) if user_id else None
+        if user is not None:
+            request.state.user = user
+        public = (
+            path in {"/", "/health", "/docs", "/openapi.json", "/redoc", "/favicon.ico",
+                     "/auth/login", "/auth/register", "/auth/logout", "/auth/me", "/auth/bootstrap"}
+            or path.startswith("/ui/login")
+            # 静态资源本身不含数据，登录页也必须能加载自己的 css/js，否则会白屏。
+            or (path.startswith("/ui/") and not path.endswith((".html", "/")))
+        )
+        if public:
+            return await call_next(request)
+        if user is None:
+            if path.startswith("/ui/"):
+                target = "/ui/login.html"
+                if path != "/ui/task_list.html":
+                    target += f"?next={quote(path)}"
+                return RedirectResponse(target, status_code=303)
+            return UTF8JSONResponse(
+                status_code=401,
+                content={"detail": {"code": "UNAUTHORIZED", "message": "请先登录"}},
+            )
         return await call_next(request)
 
     @app.get("/")

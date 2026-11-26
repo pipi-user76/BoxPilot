@@ -1,0 +1,52 @@
+<!-- 文件职责：登录页；与后端 /auth/login、/auth/register 交互，成功后跳回原页面。
+     左侧画布由 hero.js 绘制，纯 Canvas，无外部依赖。 -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · BoxPilot</title>
+  <link rel="stylesheet" href="login.css?v=20261127-8">
+</head>
+<body>
+  <main class="login-shell">
+    <section class="visual">
+      <canvas id="hero-canvas" aria-hidden="true"></canvas>
+      <h1 class="sr-only">BoxPilot 任务工作台</h1>
+      <div class="visual-brand"><span class="mark-dot"></span>BOXPILOT</div>
+      <div class="visual-foot">
+        <span>网页整理 · CSV 分析 · 仓库体检 · 页面验收</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="card">
+        <p class="mark">BOXPILOT</p>
+        <h1 id="title">登录</h1>
+        <p class="error" id="error" role="alert"></p>
+        <form id="login-form">
+          <label>用户名
+            <input id="username" name="username" autocomplete="username" required>
+          </label>
+          <label>密码
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button id="submit" type="submit">登录</button>
+        </form>
+        <form id="register-form" class="secondary">
+          <label>管理员用户名
+            <input id="reg-username" autocomplete="username" required>
+          </label>
+          <label>密码（至少 8 位）
+            <input id="reg-password" type="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <button id="register" type="submit">创建管理员账号</button>
+        </form>
+        <p class="hint">首次部署还没有账号？<button id="toggle-register" class="link" type="button">创建管理员</button></p>
+      </div>
+    </section>
+  </main>
+  <script src="hero.js?v=20261127-7"></script>
+  <script src="login.js?v=20261127-7"></script>
+</body>
+</html>

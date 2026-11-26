@@ -8,7 +8,11 @@
 BoxPilot/
 ├── backend/
 │   ├── main.py                 FastAPI 应用、静态页面挂载和公共路由装配
-│   ├── db.py                   SQLite 连接、TaskStore 契约和内存实现
+│   ├── db.py                   TaskStore 契约和内存实现（SQLite 见 sqlite_store.py）
+│   ├── sqlite_store.py         SQLite 持久化、schema 迁移到 v2 与重启恢复
+│   ├── auth.py                 密码哈希与会话签名
+│   ├── auth_store.py           用户表访问（SQLite 与内存实现）
+│   ├── routes_auth.py          登录、登出、首次注册与建号
 │   ├── scheduler.py            状态流转、固定步骤调度、取消与重试
 │   ├── logging_config.py       JSON Lines 结构化日志
 │   ├── sandbox_client.py       Shell / File / Browser（含 Readability 正文）统一调用
@@ -26,6 +30,8 @@ BoxPilot/
 │       ├── web_accept.py       曾雨格负责
 │       └── mock.py             开发期调度验证模板
 ├── frontend/
+│   ├── login.html              登录与首次创建管理员
+│   ├── login.js                登录表单交互
 │   ├── create_task.html        创建任务页面，陈咏忻负责
 │   ├── create_task.js          创建任务交互，陈咏忻负责
 │   ├── task_list.html          任务工作台，曾雨格负责
@@ -46,6 +52,7 @@ BoxPilot/
 - 后端入口：`backend.main:app`
 - 根目录 `main.py`：仅保留兼容导出，避免出现第二套实现
 - 任务工作台：`/ui/task_list.html`
+- 登录页：`/ui/login.html`
 - 创建任务页：`/ui/create_task.html`
 - API 文档：`/docs`
 - 本地产物根目录：`artifacts/`
@@ -61,6 +68,8 @@ BoxPilot/
 - `routes_csv.py` 已实现 multipart CSV 上传、大小/扩展名校验和统一调度接入。
 - 任务支持取消、失败重试、批量删除和历史清理；运行中取消在步骤边界生效。
 - 列表查询改为服务端分页与搜索，产物支持文本/图片预览和内联下载。
-- `WEB_DIGEST` 使用沙箱 Readability 提取正文，输出 `article.md` 和整页截图。
+- `WEB_DIGEST` 使用沙箱 Readability 提取正文，输出 `article.md` 和整页截图；列表页额外产出 `items.json`/`items.csv` 与表格型正文。
 - 调度器输出 JSON Lines 日志，前端展示“任务结论”和重试来源。
-- 自动化测试 42 项，其中真实沙箱集成测试默认跳过，需显式开启。
+- 任务默认持久化到 SQLite（`user_version=2`：`tasks`/`steps`/`artifacts`/`users`），支持跨进程重启恢复与按用户隔离。
+- 需要登录才能访问任务；管理员可查看全部，普通用户只看到自己的任务。
+- 自动化测试 84 项，其中真实沙箱集成测试默认跳过，需显式开启。

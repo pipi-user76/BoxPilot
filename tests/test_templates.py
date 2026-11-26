@@ -201,7 +201,7 @@ class TemplateTests(unittest.TestCase):
         self.temp_dir = make_temp_dir()
         self.addCleanup(remove_temp_dir, self.temp_dir)
         artifact_store = ArtifactStore(self.temp_dir)
-        context = TestClient(create_app(database_path=self.temp_dir / "tasks.db", artifact_store=artifact_store, adapter=sandbox))
+        context = TestClient(create_app(database_path=self.temp_dir / "tasks.db", artifact_store=artifact_store, adapter=sandbox, auth_required=False))
         self.addCleanup(context.__exit__, None, None, None)
         return context.__enter__()
 

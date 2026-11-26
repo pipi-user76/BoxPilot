@@ -28,7 +28,7 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 
 ## 当前进度
 
-更新时间：2026-11-23。集成版默认接入 SQLite 三表，四个模板沿用统一 API、调度器和沙箱适配器。工作台支持批量订阅、全选下载与规范命名，数据库与产物目录共同保存任务结果。
+更新时间：2026-11-26。集成版默认接入 SQLite 三表与用户表，四个模板沿用统一 API、调度器和沙箱适配器。工作台支持批量订阅、全选下载与规范命名；任务按用户隔离，服务器部署脚本与 systemd/Caddy 模板已补齐。
 
 | 模块 | 状态 | 当前实现 |
 |---|---|---|
@@ -43,13 +43,16 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 | Web 工作台 | 已完成进阶版 | 服务端搜索与分页、批量订阅、全选与批量下载、一键下载全部、取消/重试、任务结论、文本与图片预览 |
 | 下载命名 | 已完成 | 任务与压缩包统一为 `类型_目标_时间_短ID`，批量包按任务名分目录 |
 | SQLite 持久化 | 已接入 | 应用默认使用 SQLite 存储任务、步骤和产物索引 |
-| 10 至 15 个系统样例 | 进行中 | 已有 77 项自动化测试，尚需形成统一验收表和统计报告 |
+| 账号与数据隔离 | 已完成 | 用户名/密码登录、scrypt 哈希、签名 Cookie，任务按 `owner_id` 隔离，管理员可查看全部 |
+| 服务器部署 | 已完成 | `deploy/bootstrap.sh` 一键安装，systemd 单进程托管，Caddy 反代与 HTTPS 模板 |
+| 10 至 15 个系统样例 | 进行中 | 已有 84 项自动化测试，尚需形成统一验收表和统计报告 |
 
 当前已注册 `MOCK`、`CSV_ANALYSIS`、`WEB_DIGEST`、`REPO_CHECK` 和 `WEB_ACCEPTANCE`。未知任务类型会返回明确校验错误，不会生成伪成功任务。
 
 最近验证结果：
 
-- 77 项 Python 测试中，1 项真实沙箱集成测试默认跳过。
+- 84 项 Python 测试中，1 项真实沙箱集成测试默认跳过。
+- 登录链路已实测：未登录访问工作台 303 跳转登录页；管理员 alice 可见全部 8 条任务，新账号 bob 登录后列表为 0，直接访问 alice 的任务详情与打包接口均返回 404。
 - 真实 `WEB_DIGEST` 使用沙箱 Readability 去噪并识别列表条目，`books.toscrape.com` 抽出 20 条、268 词，产出 5 个文件（正文、条目 JSON、条目 CSV、整页截图、报告）。
 - 批量订阅一次提交多个地址，共享同一批次号；批次可在列表里筛选，详情里可一键重跑。
 - 任务与压缩包按 `类型_目标_时间_短ID` 命名，单个压缩包内的文件也带同一前缀，下载后不会互相覆盖。
@@ -80,14 +83,14 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 | 已完成 | 2026-11-16 | 四模板持久化真实沙箱回归 | 四类任务成功，重启后详情与产物内容一致 |
 | P1 | 11/13-11/17 | 建立 10 至 15 个统一测试用例和结果登记表 | 记录预期、实际、耗时、成功率及失败原因 |
 | P1 | 11/13-11/17 | 日志落盘检索与演示脚本 | 用 JSON 日志还原一次失败任务的完整经过 |
-| P2 | 11/18-11/24 | 认证、限流与独立沙箱隔离评估 | 非本机访问时必须携带凭据 |
+| 已完成 | 2026-11-26 | 登录、数据隔离与服务器部署 | 未登录跳转登录页；任务按 `owner_id` 隔离；`deploy/bootstrap.sh` 可在 Ubuntu 上一次性装好 |
 | P2 | 11/25-12/04 | README、设计文档、演示数据、演示视频和发布检查 | 在干净环境按文档启动并完成现场演示 |
 
 已知限制：沙箱网络受限时，公开仓库克隆可能超时或被拒绝；系统会自动重试一次，并给出中文原因和替代方案，现场演示优先使用 `demo://python`。
 
 ## 环境要求
 
-- Windows + Docker Desktop，或可访问本机 AIO Sandbox 的等价环境
+- Windows + Docker Desktop，或 Ubuntu 22.04/24.04（服务器部署见 [docs/deployment.md](docs/deployment.md)）
 - Python 3.13 与 `uv`
 - AIO Sandbox 1.11.0
 - 项目虚拟环境 `.venv`
@@ -140,7 +143,7 @@ uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-预期结果：`Ran 77 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 76 项测试可在未启动 Docker 时执行。
+预期结果：`Ran 84 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 83 项测试可在未启动 Docker 时执行。
 
 运行真实沙箱集成测试：
 
@@ -216,6 +219,8 @@ CSV 分析使用 `POST /tasks/csv` 的 multipart 表单上传，字段名为 `fi
 
 人工操作步骤见 [docs/manual_testing.md](docs/manual_testing.md)。
 
+服务器部署见 [docs/deployment.md](docs/deployment.md)。
+
 安全边界、信任模型与已知缺口见 [docs/security.md](docs/security.md)，命令注入、SSRF、幂等限流与超时兜底的改进方案见 [docs/security_hardening_plan.md](docs/security_hardening_plan.md)。
 
 当前阶段进展见 [docs/progress_report_2026-11-07.md](docs/progress_report_2026-11-07.md)，纯文本汇报见 [docs/progress_report_2026-11-07.txt](docs/progress_report_2026-11-07.txt)，上一阶段见 [docs/progress_report_2026-11-06.md](docs/progress_report_2026-11-06.md)。
@@ -254,27 +259,49 @@ backend/
   storage.py         本地任务产物存储
   templates/         四个任务模板
 frontend/
+  login.*            登录与首次创建管理员
+  users.*            管理员账号管理页
   create_task.*      创建任务页面
   task_list.*        任务列表、搜索分页与产物预览
 samples/             测试输入与样例
 artifacts/           程序运行产物，不提交真实数据
 logs/                结构化日志，不提交
 scripts/
-  init_db.py         四表初始化入口
+  init_db.py         三表初始化入口（用 python -m scripts.init_db 运行）
+  create_user.py     创建管理员或普通账号
   test_sandbox.py    真实沙箱冒烟测试
 tests/               单元测试、进阶用例与可选沙箱集成测试
 docs/                接口契约与验收记录
 ```
 
+## 账号与登录
+
+- 每个任务记录归属用户（`owner_id`）。普通用户只能看到、取消、重试、下载自己的任务；管理员可以查看全部任务。
+- 登录使用 HttpOnly + SameSite=Lax 的签名 Cookie，默认 7 天；密码用标准库 `scrypt` 加盐哈希，数据库里没有明文。
+- 首次部署打开 `/ui/login.html`，点“创建管理员”即可；之后管理员登录工作台，点右上角“账号”进入 `/ui/users.html` 创建普通用户或管理员，也可以运行 `python -m scripts.create_user <用户名> <密码> [--admin]`。
+- 生产环境必须设置 `SESSION_SECRET`，否则每次重启都会让所有会话失效；开启 HTTPS 后再把 `SESSION_COOKIE_SECURE` 设为 `true`。
+- 数据库从 `user_version=1` 自动迁移到 2：新增 `users` 表与 `tasks.owner_id`。旧任务没有归属，只有管理员可见。
+
 ## 安全边界
 
 - 沙箱端口只绑定本机回环地址。
+- 未登录时页面跳转到登录页，任务与产物接口返回 401；任务级接口统一校验 `owner_id`，越权访问按 404 处理。
 - Shell 命令经过危险模式检查，并限制在任务工作目录内执行；用户参数统一经 `quote_arg` 转义并拒绝控制字符。
 - 网页任务会解析域名并拒绝回环、内网、链路本地和云元数据地址，端口只允许 80/443。
 - 相同任务参数在 300 秒内只创建一次；`POST /tasks` 与 `POST /tasks/csv` 按来源 IP 限流，超限返回 429。
 - 任务 ID、文件名和相对路径均做路径逃逸校验。
 - 下载只允许访问数据库/任务记录中已登记的产物。
 - 黑名单不是完整隔离。代码体检只应运行可信公开仓库和预设测试命令。
+
+## 部署
+
+服务器部署步骤、systemd 与 Caddy 模板见 [docs/deployment.md](docs/deployment.md)。一键脚本：
+
+```bash
+sudo REPO_URL=git@github.com:you/BoxPilot.git bash deploy/bootstrap.sh
+```
+
+脚本会把沙箱、后端和 systemd 服务装好，默认只监听本机端口，再由 Caddy 对外提供 HTTPS。
 
 ## 已知限制
 

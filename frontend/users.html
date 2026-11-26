@@ -1,0 +1,77 @@
+<!-- 文件职责：管理员账号管理页；列出账号并由管理员创建新用户。 -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>账号管理 · BoxPilot</title>
+  <link rel="stylesheet" href="styles.css?v=20261126">
+  <link rel="stylesheet" href="users.css?v=20261127">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div>
+        <p class="product-mark">BOXPILOT</p>
+        <h1>账号管理</h1>
+      </div>
+      <div class="header-actions">
+        <span id="current-user" class="user-chip" hidden></span>
+        <a class="button ghost" href="task_list.html">返回工作台</a>
+        <button id="logout" class="button ghost" type="button" hidden>退出</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <div class="users-layout">
+      <section class="user-panel">
+        <div class="section-header">
+          <h2>账号列表</h2>
+          <span id="user-count" class="muted-text">0 个账号</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>用户名</th>
+                <th>角色</th>
+                <th>创建时间</th>
+                <th>最近登录</th>
+              </tr>
+            </thead>
+            <tbody id="user-rows"></tbody>
+          </table>
+        </div>
+        <p id="list-error" class="form-error" role="alert"></p>
+      </section>
+
+      <section class="user-panel">
+        <div class="section-header">
+          <h2>创建账号</h2>
+        </div>
+        <form id="create-user-form" class="user-form">
+          <label>用户名
+            <input id="new-username" name="username" autocomplete="off" minlength="3" maxlength="32" required>
+          </label>
+          <p class="field-hint">字母、数字、下划线、点或短横线，3 到 32 位。</p>
+          <label>初始密码
+            <input id="new-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <p class="field-hint">至少 8 位，创建后请让使用者自行修改。</p>
+          <label>角色
+            <select id="new-role">
+              <option value="user">普通用户</option>
+              <option value="admin">管理员</option>
+            </select>
+          </label>
+          <button id="create-user" class="button" type="submit">创建账号</button>
+          <p id="form-error" class="form-error" role="alert"></p>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <script src="users.js?v=20261127"></script>
+</body>
+</html>

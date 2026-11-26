@@ -1,6 +1,18 @@
 # BoxPilot 接口与分工契约
 
-版本：v0.3，2026-11-07。曾雨格负责沙箱、调度、公共 API 和四个模板；陈咏忻负责 SQLite 四表持久化。
+版本：v0.4，2026-11-26。曾雨格负责沙箱、调度、公共 API 和四个模板；陈咏忻负责 SQLite 持久化（`tasks`、`steps`、`artifacts` 与登录用的 `users`）。
+
+## 0. 账号与数据隔离
+
+所有任务接口都要求登录，未登录返回 401 `UNAUTHORIZED`；页面请求 303 跳转到 `/ui/login.html`。
+
+- `GET /auth/bootstrap` → `{needs_admin}`：库里没有任何用户时为 `true`。
+- `POST /auth/register` → 仅首次开放，201，首个用户为管理员；之后 403 `REGISTRATION_CLOSED`。
+- `POST /auth/login` → 200 `{user, expires_at}` 并设置 `boxpilot_session` Cookie；失败 401 `INVALID_CREDENTIALS`。
+- `POST /auth/logout`、`GET /auth/me`（未登录 401）。
+- `POST /auth/users` → 管理员创建普通账号，201；非管理员 403 `FORBIDDEN`，重名 409 `USERNAME_TAKEN`。
+
+任务记录带 `owner_id`。普通用户只能看到和操作自己的任务；管理员可以看全部。越权访问任务、产物、预览或打包一律返回 404 `TASK_NOT_FOUND` / `ARTIFACT_NOT_FOUND`，不泄露是否存在。
 
 ## 1. 状态约定
 

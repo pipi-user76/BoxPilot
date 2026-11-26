@@ -43,7 +43,7 @@ class ApiTests(unittest.TestCase):
         # 每个测试使用独立临时目录，避免产物或任务状态互相影响。
         self.temp_dir = make_temp_dir()
         artifact_store = ArtifactStore(self.temp_dir)
-        self.client_context = TestClient(create_app(database_path=self.temp_dir / "tasks.db", artifact_store=artifact_store, adapter=FakeSandbox()))
+        self.client_context = TestClient(create_app(database_path=self.temp_dir / "tasks.db", artifact_store=artifact_store, adapter=FakeSandbox(), auth_required=False))
         self.client = self.client_context.__enter__()
 
     def tearDown(self) -> None:

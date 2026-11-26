@@ -34,6 +34,7 @@ from backend.models import (
     TaskRecord,
     TaskStatus,
     TaskType,
+    UserRecord,
     utc_now,
 )
 from backend.naming import display_name, slug, task_stem
@@ -59,6 +60,42 @@ def _runner(request: Request) -> TaskRunner:
 
 def _artifact_store(request: Request) -> ArtifactStore:
     return request.app.state.artifact_store
+
+
+def _user(request: Request) -> UserRecord:
+    """认证中间件已保证存在；这里只做类型收敛，避免路由里到处 getattr。"""
+    user = getattr(request.state, "user", None)
+    if user is None:  # 理论上不会走到，auth_required=False 时也不会调用归属判断
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "请先登录"},
+        )
+    return user
+
+
+def _owner_filter(request: Request) -> str | None:
+    """管理员看全部任务；普通用户只看自己的。"""
+    user = _user(request)
+    return None if user.is_admin else user.id
+
+
+def _visible(task: TaskRecord | None, request: Request) -> bool:
+    if task is None:
+        return False
+    user = _user(request)
+    return user.is_admin or task.owner_id == user.id
+
+
+def _scoped_task(request: Request, task_id: str) -> TaskRecord:
+    """取任务并校验归属；无权访问统一返回 404，避免暴露任务是否存在。"""
+    task = _store(request).get_task(task_id)
+    if not _visible(task, request):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "TASK_NOT_FOUND", "message": f"task not found: {task_id}"},
+        )
+    assert task is not None
+    return task
 
 
 def _parse_statuses(raw: str | None) -> list[TaskStatus] | None:
@@ -102,7 +139,7 @@ def create_task(
     store = _store(request)
     dedupe_key = build_dedupe_key(payload.task_type, payload.params)
     task = store.create_task(
-        payload.task_type, payload.params, dedupe_key=dedupe_key,
+        payload.task_type, payload.params, owner_id=_user(request).id, dedupe_key=dedupe_key,
         dedupe_since=utc_now() - timedelta(seconds=settings.DEDUPE_WINDOW_SECONDS),
     )
     if task.deduplicated:
@@ -161,6 +198,7 @@ def create_batch(
         task = store.create_task(
             payload.task_type,
             params,
+            owner_id=_user(request).id,
             dedupe_key=build_dedupe_key(payload.task_type, params),
             dedupe_since=dedupe_since,
         )
@@ -205,12 +243,14 @@ def list_tasks(
 ) -> TaskListResponse:
     store = _store(request)
     statuses = _parse_statuses(status_filter)
+    owner_id = _owner_filter(request)
     items, total = store.list_tasks(
         query=q,
         statuses=statuses,
         task_type=task_type,
         page=page,
         page_size=page_size,
+        owner_id=owner_id,
     )
     return TaskListResponse(
         items=items,
@@ -218,7 +258,7 @@ def list_tasks(
         page=page,
         page_size=page_size,
         pages=max(1, math.ceil(total / page_size)),
-        counts=store.count_tasks(),
+        counts=store.count_tasks(owner_id),
     )
 
 
@@ -231,7 +271,7 @@ def batch_delete_tasks(payload: BatchDeleteRequest, request: Request) -> BatchDe
     skipped: list[str] = []
     for task_id in payload.task_ids:
         task = store.get_task(task_id)
-        if task is None or task.status in {TaskStatus.PENDING, TaskStatus.RUNNING}:
+        if task is None or not _visible(task, request) or task.status in {TaskStatus.PENDING, TaskStatus.RUNNING}:
             skipped.append(task_id)
             continue
         store.delete_task(task_id)
@@ -253,7 +293,8 @@ def cleanup_tasks(payload: CleanupRequest, request: Request) -> BatchDeleteRespo
     store = _store(request)
     artifact_store = _artifact_store(request)
     cutoff = utc_now() - timedelta(days=payload.older_than_days)
-    deleted_ids = store.purge_tasks(payload.statuses, cutoff)
+    # 普通用户只清理自己的历史；管理员清理全部。
+    deleted_ids = store.purge_tasks(payload.statuses, cutoff, _owner_filter(request))
     for task_id in deleted_ids:
         artifact_store.delete_task_dir(task_id)
     log.info("tasks_cleaned", extra={"deleted": len(deleted_ids), "older_than_days": payload.older_than_days})
@@ -262,18 +303,13 @@ def cleanup_tasks(payload: CleanupRequest, request: Request) -> BatchDeleteRespo
 
 @router.get("/tasks/{task_id}", response_model=TaskRecord)
 def get_task(task_id: str, request: Request) -> TaskRecord:
-    task = _store(request).get_task(task_id)
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "TASK_NOT_FOUND", "message": f"task not found: {task_id}"},
-        )
-    return task
+    return _scoped_task(request, task_id)
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=TaskRecord, status_code=status.HTTP_202_ACCEPTED)
 def cancel_task(task_id: str, request: Request) -> TaskRecord:
     """取消等待中或运行中的任务；运行中任务在当前步骤结束后停止。"""
+    _scoped_task(request, task_id)
     try:
         return _runner(request).request_cancel(task_id)
     except TaskNotFound as exc:
@@ -291,6 +327,7 @@ def cancel_task(task_id: str, request: Request) -> TaskRecord:
 @router.post("/tasks/{task_id}/retry", response_model=TaskRecord, status_code=status.HTTP_202_ACCEPTED)
 def retry_task(task_id: str, background_tasks: BackgroundTasks, request: Request) -> TaskRecord:
     """为失败、超时或取消的任务创建新的执行记录，原记录保留用于对比。"""
+    _scoped_task(request, task_id)
     runner = _runner(request)
     try:
         retried = runner.retry_task(task_id)
@@ -312,7 +349,17 @@ def _archive_response(ids: list[str], request: Request) -> StreamingResponse:
     """把任务产物打包成 zip，文件名统一用“类型_目标_时间_短ID”。"""
     store = _store(request)
     artifact_store = _artifact_store(request)
-    tasks = [task for task in (store.get_task(task_id) for task_id in dict.fromkeys(ids)) if task is not None]
+    unique_ids = list(dict.fromkeys(ids))
+    tasks = []
+    for task_id in unique_ids:
+        task = store.get_task(task_id)
+        # 任何一个 ID 不属于当前用户都按不存在处理，避免越权打包别人的产物。
+        if not _visible(task, request):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "TASK_NOT_FOUND", "message": f"task not found: {task_id}"},
+            )
+        tasks.append(task)
     stems = {task.id: task_stem(task) for task in tasks}
     single = len(tasks) == 1
     buffer = io.BytesIO()
@@ -372,13 +419,7 @@ def download_task_archives(task_ids: str, request: Request) -> StreamingResponse
 
 @router.get("/tasks/{task_id}/artifacts", response_model=list[Artifact])
 def list_artifacts(task_id: str, request: Request) -> list[Artifact]:
-    task = _store(request).get_task(task_id)
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "TASK_NOT_FOUND", "message": f"task not found: {task_id}"},
-        )
-    return task.artifacts
+    return _scoped_task(request, task_id).artifacts
 
 
 def _resolve_artifact(artifact_id: str, request: Request) -> tuple[TaskRecord, Artifact, Path]:
@@ -391,7 +432,8 @@ def _resolve_artifact(artifact_id: str, request: Request) -> tuple[TaskRecord, A
         )
     artifact, task_id = found
     task = _store(request).get_task(task_id)
-    if task is None:
+    if task is None or not _visible(task, request):
+        # 产物 ID 命中但不属于当前用户时同样返回 404，避免泄露存在性。
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "ARTIFACT_NOT_FOUND", "message": "artifact not found"},

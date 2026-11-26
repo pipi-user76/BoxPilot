@@ -90,6 +90,8 @@ class TaskRecord(BaseModel):
     error_message: str | None = None
     attempt: int = 1
     retry_of: str | None = None
+    # 归属用户；历史任务没有归属时只有管理员可见。
+    owner_id: str | None = None
     # 幂等键在窗口内唯一；deduplicated 只在响应中标记，表示命中已有任务而未新建。
     dedupe_key: str | None = None
     deduplicated: bool = False
@@ -98,6 +100,36 @@ class TaskRecord(BaseModel):
     finished_at: datetime | None = None
     steps: list[TaskStep] = Field(default_factory=list)
     artifacts: list[Artifact] = Field(default_factory=list)
+
+
+class UserRecord(BaseModel):
+    """最小用户模型；密码哈希只在存储层出现，不进入任何响应。"""
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    username: str
+    is_admin: bool = False
+    created_at: datetime = Field(default_factory=utc_now)
+    last_login_at: datetime | None = None
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    password: str = Field(min_length=8, max_length=256)
+
+
+class NewUserRequest(RegisterRequest):
+    """管理员创建账号时可以顺带指定角色。"""
+
+    is_admin: bool = False
+
+
+class AuthResponse(BaseModel):
+    user: UserRecord
+    expires_at: datetime
 
 
 class TaskListResponse(BaseModel):

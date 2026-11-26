@@ -1,0 +1,23 @@
+[Unit]
+Description=BoxPilot task workbench
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=boxpilot
+Group=boxpilot
+WorkingDirectory=/opt/boxpilot
+EnvironmentFile=/etc/boxpilot.env
+ExecStart=/opt/boxpilot/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/boxpilot
+
+[Install]
+WantedBy=multi-user.target

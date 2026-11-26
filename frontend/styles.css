@@ -124,6 +124,29 @@ select:focus-visible {
   border-color: var(--accent);
 }
 
+/* 顶栏用户标识与退出按钮：只做轻量提示，不与主操作抢视觉。 */
+.user-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.button.ghost:hover {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
 .button:disabled {
   cursor: not-allowed;
   opacity: 0.55;

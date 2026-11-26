@@ -124,6 +124,7 @@ class TaskRunner:
             task.params,
             attempt=task.attempt + 1,
             retry_of=task.id,
+            owner_id=task.owner_id,
         )
         if task.task_type == TaskType.CSV_ANALYSIS:
             try:

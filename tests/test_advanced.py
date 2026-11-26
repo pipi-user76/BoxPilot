@@ -119,6 +119,7 @@ class AdvancedApiTests(unittest.TestCase):
             artifact_store=self.artifact_store,
             adapter=sandbox or StubSandbox(),
             templates=templates,
+            auth_required=False,
         )
         context = TestClient(self.app)
         self.addCleanup(context.__exit__, None, None, None)

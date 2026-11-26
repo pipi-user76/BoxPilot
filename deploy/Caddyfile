@@ -1,0 +1,18 @@
+# Caddy 反向代理模板。复制到 /etc/caddy/Caddyfile 后按注释替换。
+# 有域名时 Caddy 会自动申请 HTTPS 证书；只填 IP 则使用 HTTP。
+{
+	email you@example.com
+}
+
+boxpilot.example.com {
+	encode zstd gzip
+
+	# 可选的双层保护。需要 Caddy 2.8+；旧版本把 basic_auth 改成 basicauth。
+	# 生成哈希：caddy hash-password --plaintext '换成你的口令'
+	basic_auth {
+		admin $2a$14$REPLACE_WITH_CADDY_HASH
+	}
+
+	# 静态页面也走应用，登录与鉴权由 BoxPilot 自己处理。
+	reverse_proxy 127.0.0.1:8000
+}

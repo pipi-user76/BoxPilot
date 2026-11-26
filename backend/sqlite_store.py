@@ -10,7 +10,7 @@ SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tasks (
         id TEXT PRIMARY KEY, task_type TEXT NOT NULL,
         status TEXT NOT NULL CHECK(status IN ('PENDING','RUNNING','SUCCESS','FAILED','TIMEOUT','CANCELLED')),
-        dedupe_key TEXT, created_at TEXT NOT NULL, payload TEXT NOT NULL
+        dedupe_key TEXT, owner_id TEXT, created_at TEXT NOT NULL, payload TEXT NOT NULL
     )""",
     """CREATE TABLE IF NOT EXISTS steps (
         id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -21,9 +21,28 @@ SCHEMA = (
         id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
         relative_path TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(task_id, relative_path)
     )""",
+    """CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password_hash TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL, last_login_at TEXT
+    )""",
     'CREATE INDEX IF NOT EXISTS task_created ON tasks(created_at DESC, id DESC)',
     'CREATE INDEX IF NOT EXISTS task_dedupe ON tasks(dedupe_key, created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS task_owner ON tasks(owner_id, created_at DESC)',
 )
+
+# v1 -> v2：加入用户表与任务归属。历史任务 owner_id 保持 NULL，只有管理员可见。
+MIGRATION_V2 = (
+    """CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password_hash TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL, last_login_at TEXT
+    )""",
+    'ALTER TABLE tasks ADD COLUMN owner_id TEXT',
+    'CREATE INDEX IF NOT EXISTS task_owner ON tasks(owner_id, created_at DESC)',
+)
+
+SCHEMA_VERSION = 2
 
 
 class SQLiteTaskStore:
@@ -53,7 +72,12 @@ class SQLiteTaskStore:
             db.close()
         with self._connection(write=True) as db:
             version = db.execute('PRAGMA user_version').fetchone()[0]
+            if version == SCHEMA_VERSION:
+                return
             if version == 1:
+                for statement in MIGRATION_V2:
+                    db.execute(statement)
+                db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
                 return
             if version != 0 or db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
@@ -61,7 +85,7 @@ class SQLiteTaskStore:
                 raise RuntimeError(f'无法使用此数据库结构：{self.path}。请配置新的 DATABASE_PATH。')
             for statement in SCHEMA:
                 db.execute(statement)
-            db.execute('PRAGMA user_version = 1')
+            db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
 
     def _task_models(self, db, rows):
         tasks = {
@@ -91,34 +115,42 @@ class SQLiteTaskStore:
         with self._connection() as db:
             return self._get_task(db, task_id)
 
-    def _dedupe_match(self, db, key, since):
+    def _dedupe_match(self, db, key, since, owner_id=None):
         row = db.execute(
-            """SELECT id FROM tasks WHERE dedupe_key=? AND created_at>=?
+            """SELECT id FROM tasks WHERE dedupe_key=? AND created_at>=? AND owner_id IS ?
             AND status IN ('PENDING','RUNNING','SUCCESS') ORDER BY created_at DESC, id DESC LIMIT 1""",
-            (key, since.isoformat(timespec="microseconds")),
+            (key, since.isoformat(timespec="microseconds"), owner_id),
         ).fetchone()
         return self._get_task(db, row['id']) if row else None
 
-    def find_by_dedupe(self, dedupe_key, since):
+    def find_by_dedupe(self, dedupe_key, since, owner_id=None):
         with self._connection() as db:
-            return self._dedupe_match(db, dedupe_key, since)
+            return self._dedupe_match(db, dedupe_key, since, owner_id)
 
-    def create_task(self, task_type, params, *, attempt=1, retry_of=None, dedupe_key=None,
-                    dedupe_since=None):
+    def create_task(self, task_type, params, *, attempt=1, retry_of=None, owner_id=None,
+                    dedupe_key=None, dedupe_since=None):
         task = TaskRecord(task_type=task_type, params=params, attempt=attempt, retry_of=retry_of,
-                          dedupe_key=dedupe_key)
+                          owner_id=owner_id, dedupe_key=dedupe_key)
         with self._connection(write=True) as db:
             if dedupe_key and dedupe_since is not None:
-                existing = self._dedupe_match(db, dedupe_key, dedupe_since)
+                existing = self._dedupe_match(db, dedupe_key, dedupe_since, owner_id)
                 if existing is not None:
                     return existing.model_copy(update={'deduplicated': True})
-            db.execute('INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?)',
-                       (task.id, task.task_type.value, task.status.value, dedupe_key,
-                        task.created_at.isoformat(timespec="microseconds"), task.model_dump_json(exclude={'steps', 'artifacts'})))
+            db.execute(
+                'INSERT INTO tasks (id, task_type, status, dedupe_key, owner_id, created_at, payload)'
+                ' VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (task.id, task.task_type.value, task.status.value, dedupe_key, owner_id,
+                 task.created_at.isoformat(timespec="microseconds"),
+                 task.model_dump_json(exclude={'steps', 'artifacts'})),
+            )
         return task
 
-    def list_tasks(self, *, query='', statuses=None, task_type=None, page=1, page_size=20):
+    def list_tasks(self, *, query='', statuses=None, task_type=None, page=1, page_size=20,
+                   owner_id=None):
         predicates, params = [], []
+        if owner_id is not None:
+            predicates.append('owner_id=?')
+            params.append(owner_id)
         if statuses:
             predicates.append('status IN (' + ','.join('?' for _ in statuses) + ')')
             params.extend(statuses)
@@ -143,24 +175,26 @@ class SQLiteTaskStore:
             )
             return self._task_models(db, rows), total
 
-    def count_tasks(self):
+    def count_tasks(self, owner_id=None):
         counts = {status.value: 0 for status in TaskStatus}
+        where, params = (' WHERE owner_id=?', (owner_id,)) if owner_id is not None else ('', ())
         with self._connection() as db:
-            counts.update(dict(db.execute('SELECT status,count(*) FROM tasks GROUP BY status')))
+            counts.update(dict(db.execute('SELECT status,count(*) FROM tasks' + where + ' GROUP BY status', params)))
         return {'total': sum(counts.values()), **counts}
 
     def delete_task(self, task_id):
         with self._connection(write=True) as db:
             return db.execute('DELETE FROM tasks WHERE id=?', (task_id,)).rowcount > 0
 
-    def purge_tasks(self, statuses, older_than):
+    def purge_tasks(self, statuses, older_than, owner_id=None):
         if not statuses:
             return []
         placeholders = ','.join('?' for _ in statuses)
+        owner_clause, owner_params = (' AND owner_id=?', (owner_id,)) if owner_id is not None else ('', ())
         with self._connection(write=True) as db:
             return [row['id'] for row in db.execute(
-                f'DELETE FROM tasks WHERE status IN ({placeholders}) AND created_at<? RETURNING id',
-                (*statuses, older_than.isoformat(timespec="microseconds")),
+                f'DELETE FROM tasks WHERE status IN ({placeholders}) AND created_at<?' + owner_clause + ' RETURNING id',
+                (*statuses, older_than.isoformat(timespec="microseconds"), *owner_params),
             )]
 
     def _require_task(self, db, task_id):

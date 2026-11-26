@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BoxPilot 任务工作台</title>
-  <link rel="stylesheet" href="styles.css?v=20261123-2">
+  <link rel="stylesheet" href="styles.css?v=20261126">
 </head>
 <body>
   <header class="app-header">
@@ -15,6 +15,9 @@
         <h1>任务工作台</h1>
       </div>
       <div class="header-actions">
+        <span id="current-user" class="user-chip" hidden></span>
+        <a id="users-link" class="button ghost" href="users.html" hidden>账号</a>
+        <button id="logout" class="button ghost" type="button" hidden>退出</button>
         <span id="health" class="health-badge" data-state="loading">检查环境</span>
         <a class="button secondary" href="create_task.html">创建任务</a>
         <button id="refresh" class="button" type="button">刷新</button>
@@ -131,6 +134,6 @@
     </div>
   </dialog>
 
-  <script src="task_list.js?v=20261123-2"></script>
+  <script src="task_list.js?v=20261126"></script>
 </body>
 </html>

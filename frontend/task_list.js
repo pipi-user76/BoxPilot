@@ -91,6 +91,9 @@ const elements = {
   previewMeta: document.querySelector("#preview-meta"),
   previewDownload: document.querySelector("#preview-download"),
   previewClose: document.querySelector("#preview-close"),
+  currentUser: document.querySelector("#current-user"),
+  usersLink: document.querySelector("#users-link"),
+  logout: document.querySelector("#logout"),
   counts: {
     total: document.querySelector("#task-count"),
     running: document.querySelector("#running-count"),
@@ -152,6 +155,12 @@ async function api(url, options = {}) {
     headers: { Accept: "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}) },
     ...options,
   });
+  if (response.status === 401) {
+    // 会话过期时直接回登录页，避免页面停在“加载中”。
+    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.replace(`/ui/login.html?next=${next}`);
+    throw new Error("登录已过期");
+  }
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     const detail = body?.detail;
@@ -711,6 +720,23 @@ elements.previewClose.addEventListener("click", () => elements.previewDialog.clo
 elements.previewDialog.addEventListener("click", (event) => {
   if (event.target === elements.previewDialog) elements.previewDialog.close();
 });
+elements.logout.addEventListener("click", async () => {
+  await fetch("/auth/logout", { method: "POST" });
+  window.location.replace("/ui/login.html");
+});
 
+async function loadCurrentUser() {
+  try {
+    const user = await api("/auth/me");
+    elements.currentUser.textContent = user.is_admin ? `${user.username} · 管理员` : user.username;
+    elements.currentUser.hidden = false;
+    elements.logout.hidden = false;
+    if (user.is_admin) elements.usersLink.hidden = false;
+  } catch {
+    // api() 已在 401 时跳转，这里保持安静，避免重复提示。
+  }
+}
+
+loadCurrentUser();
 refreshHealth();
 refresh();
