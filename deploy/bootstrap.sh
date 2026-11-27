@@ -60,6 +60,8 @@ else
     --name "$SANDBOX_NAME" \
     --restart unless-stopped \
     --shm-size=1g \
+    --cap-add=SYS_ADMIN \
+    --security-opt seccomp=unconfined \
     -p 127.0.0.1:8080:8080 \
     "$SANDBOX_IMAGE"
 fi
