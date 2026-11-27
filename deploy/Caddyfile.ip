@@ -1,0 +1,6 @@
+# 只有公网 IP、没有域名时使用：复制到 /etc/caddy/Caddyfile。
+# 登录与权限由 BoxPilot 自己处理，这里只做 80 端口转发。
+:80 {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8000
+}

@@ -75,7 +75,19 @@ log "安装 Python 3.13 与项目依赖"
 sudo -u "$SERVICE_USER" env \
   UV_INDEX_URL="$UV_INDEX_URL" \
   UV_PYTHON_INSTALL_MIRROR="$UV_PYTHON_INSTALL_MIRROR" \
-  bash -lc "cd '$APP_DIR' && uv python install 3.13 && uv sync --locked"
+  bash -lc "cd '$APP_DIR' && uv python install 3.13"
+# 锁定文件里记录的是 pypi.org；换成国内镜像后 uv 会拒绝 --locked。
+# 先按锁定文件装，失败再按当前镜像源更新锁文件，避免部署卡死。
+if ! sudo -u "$SERVICE_USER" env \
+  UV_INDEX_URL="$UV_INDEX_URL" \
+  UV_PYTHON_INSTALL_MIRROR="$UV_PYTHON_INSTALL_MIRROR" \
+  bash -lc "cd '$APP_DIR' && uv sync --locked"; then
+  log "uv.lock 与当前镜像源不一致，改用 uv sync 更新锁文件"
+  sudo -u "$SERVICE_USER" env \
+    UV_INDEX_URL="$UV_INDEX_URL" \
+    UV_PYTHON_INSTALL_MIRROR="$UV_PYTHON_INSTALL_MIRROR" \
+    bash -lc "cd '$APP_DIR' && uv sync"
+fi
 
 log "写入 /etc/boxpilot.env"
 if [ ! -f /etc/boxpilot.env ]; then

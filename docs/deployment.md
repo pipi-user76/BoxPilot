@@ -2,6 +2,8 @@
 
 本文面向 Ubuntu 22.04/24.04。最低配置建议 2 核 4G、60 GB 磁盘；2 核 2G 的机器需要先加 4 GB swap，否则沙箱里的 Chromium 很容易把内存吃满。
 
+第一次部署、不想看长文档的话，按 [deploy_quickstart.md](deploy_quickstart.md) 一步步粘贴即可。
+
 部署形态是三个进程：
 
 - AIO Sandbox 容器，只监听 `127.0.0.1:8080`。
