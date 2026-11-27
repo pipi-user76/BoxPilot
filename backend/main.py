@@ -24,11 +24,17 @@ from backend.db import TaskStore
 from backend.sqlite_store import SQLiteTaskStore
 from backend.logging_config import configure_logging
 from backend.models import HealthResponse, TaskType, UserRecord
+from backend.kb import ChromaIndex, KnowledgeBaseService
+from backend.llm import llm_client
 from backend.routes_auth import router as auth_router
 from backend.routes_csv import router as csv_router
+from backend.routes_kb import router as kb_router
+from backend.routes_notifications import router as notifications_router
+from backend.routes_schedules import router as schedules_router
 from backend.routes_tasks import router as tasks_router
 from backend.sandbox_client import SandboxAdapter, sandbox_adapter
 from backend.scheduler import TaskRunner, build_runner
+from backend.schedules import ScheduleRunner
 from backend.storage import ArtifactStore
 from backend.templates.base import TaskTemplate
 from backend.templates.csv_analysis import CsvAnalysisTemplate
@@ -80,6 +86,7 @@ def create_app(
         (TaskType.WEB_ACCEPTANCE, WebAcceptTemplate(selected_adapter)),
     ]
     selected_runner = build_runner(selected_store, selected_artifacts, selected_adapter, selected_templates)
+    selected_schedules: ScheduleRunner | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -97,7 +104,25 @@ def create_app(
         app.state.artifact_store = selected_artifacts
         app.state.sandbox_adapter = selected_adapter
         app.state.task_runner = selected_runner
-        yield
+        app.state.templates = dict(selected_templates)
+        # 知识库：Chroma 不可用时降级为“只存文档、不提供问答”，不影响其余功能。
+        try:
+            kb_index = ChromaIndex(settings.CHROMA_PATH)
+        except Exception:  # pragma: no cover - 环境缺依赖时走降级
+            kb_index = None
+        app.state.kb_service = KnowledgeBaseService(
+            selected_store, selected_artifacts, llm_client, kb_index,
+        )
+        app.state.kb_index = kb_index
+        # 定时任务线程随应用启动/停止，避免测试或重启后残留后台扫描。
+        nonlocal selected_schedules
+        selected_schedules = ScheduleRunner(selected_store, selected_runner)
+        selected_schedules.start()
+        app.state.schedule_runner = selected_schedules
+        try:
+            yield
+        finally:
+            selected_schedules.stop()
 
     app = FastAPI(
         title=settings.PROJECT_NAME,
@@ -108,7 +133,10 @@ def create_app(
     )
     app.include_router(tasks_router)
     app.include_router(csv_router)
+    app.include_router(kb_router)
     app.include_router(auth_router)
+    app.include_router(schedules_router)
+    app.include_router(notifications_router)
     # 中间件可能早于 lifespan 读取，先在对象上放一份；lifespan 会覆盖为同一值。
     app.state.session_secret = session_secret
     # 前端使用原生静态文件，不需要额外启动 Node 服务；访问 /ui 即可打开工作台。

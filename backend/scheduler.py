@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from backend.config import settings
 from backend.db import TaskStore
 from backend.logging_config import get_logger
+from backend.naming import TYPE_LABELS
 from backend.models import (
     TERMINAL_TASK_STATUSES,
     Artifact,
@@ -81,6 +82,25 @@ class TaskRunner:
                 # 无论成功、失败还是取消，都不能让取消标记泄漏到下一次执行。
                 with self._state_lock:
                     self._cancel_requested.discard(task_id)
+                self._notify(task_id)
+
+    def _notify(self, task_id: str) -> None:
+        """任务结束后写一条站内通知；没有归属账号的任务不通知。"""
+        task = self.store.get_task(task_id)
+        if task is None or not task.owner_id:
+            return
+        if task.status not in (TaskStatus.SUCCESS, TaskStatus.FAILED, TaskStatus.TIMEOUT):
+            return
+        ok = task.status == TaskStatus.SUCCESS
+        title = f"{TYPE_LABELS.get(task.task_type, task.task_type.value)}任务{'完成' if ok else '失败'}"
+        body = "执行成功，可查看产物。" if ok else (task.error_message or "执行失败，请查看详情。")
+        try:
+            self.store.create_notification(
+                task.owner_id, task.id, task.task_type,
+                "success" if ok else "error", title, body,
+            )
+        except Exception:  # 通知失败不能影响任务结果
+            self.log.exception("notification_failed", extra={"task_id": task_id})
 
     def request_cancel(self, task_id: str) -> TaskRecord:
         """请求取消任务：等待中的任务立即结束，运行中的任务在下一步骤前结束。"""

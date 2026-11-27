@@ -67,3 +67,25 @@ class SQLiteStoreTests(unittest.TestCase):
         self.assertEqual(len({r.id for r in responses}), 1)
         self.assertEqual(sum(not r.deduplicated for r in responses), 1)
         self.assertEqual(self.store.count_tasks()['total'], 1)
+
+    def test_upgrades_v2_database_and_keeps_existing_tasks(self):
+        task = self.store.create_task(TaskType.MOCK, {'tag': 'legacy'})
+        with closing(sqlite3.connect(self.path)) as db:
+            db.execute('DROP TABLE schedules')
+            db.execute('PRAGMA user_version = 2')
+            db.commit()
+
+        upgraded = SQLiteTaskStore(self.path)
+        upgraded.init_db()
+
+        with closing(sqlite3.connect(self.path)) as db:
+            version = db.execute('PRAGMA user_version').fetchone()[0]
+            tables = {row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )}
+        self.assertEqual(version, 5)
+        self.assertIn('schedules', tables)
+        self.assertIn('notifications', tables)
+        self.assertIn('knowledge_bases', tables)
+        self.assertEqual(upgraded.get_task(task.id).params['tag'], 'legacy')
+

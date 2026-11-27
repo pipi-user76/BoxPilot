@@ -80,6 +80,19 @@ sudo systemctl enable --now boxpilot
 
 6. 配反向代理：把 `deploy/Caddyfile` 复制到 `/etc/caddy/Caddyfile`，替换域名与 Basic Auth 哈希，然后 `sudo systemctl reload caddy`。Caddy 2.8 以下把 `basic_auth` 改写成 `basicauth`。
 
+## 沙箱扩展依赖（可选）
+
+基础四类任务不需要额外依赖。需要做 CSV 可视化、统计建模时，在服务器上执行：
+
+```bash
+cd /opt/boxpilot
+docker cp scripts/sandbox_extras.sh boxpilot-sandbox:/tmp/sandbox_extras.sh
+docker exec boxpilot-sandbox bash /tmp/sandbox_extras.sh
+docker exec boxpilot-sandbox /home/gem/extras-venv/bin/python -c "import pandas, sklearn; print(pandas.__version__)"
+```
+
+脚本会创建 `/home/gem/extras-venv`，安装 `pandas`、`matplotlib`、`scikit-learn`，不影响镜像自带 Python。2 核 4G 的机器安装时内存会短时升高，建议在低峰执行。
+
 ## 三、验证清单
 
 ```bash

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>定时任务 · BoxPilot</title>
+  <link rel="stylesheet" href="styles.css?v=20261127-30">
+  <link rel="stylesheet" href="schedules.css?v=20261127-37">
+</head>
+<body>
+  <div class="app-shell no-detail">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <div><strong>BOXPILOT</strong><small>任务执行工作台</small></div>
+      </div>
+      <nav class="side-nav">
+        <p class="side-title">工作空间</p>
+        <a class="side-link with-icon" href="task_list.html">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/></svg>
+          <span>全部任务</span>
+        </a>
+        <a class="side-link with-icon active" href="schedules.html">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2" stroke-linecap="round"/></svg>
+          <span>定时任务</span>
+        </a>
+        <p class="side-title">功能</p>
+        <a class="side-link with-icon" href="task_list.html?type=WEB_DIGEST"><span>网页资料整理</span></a>
+        <a class="side-link with-icon" href="task_list.html?type=CSV_ANALYSIS"><span>CSV 数据分析</span></a>
+        <a class="side-link with-icon" href="task_list.html?type=REPO_CHECK"><span>代码仓库体检</span></a>
+        <a class="side-link with-icon" href="task_list.html?type=WEB_ACCEPTANCE"><span>网页应用验收</span></a>
+        <p class="side-title">账号</p>
+        <a class="side-link with-icon" href="users.html"><span>账号管理</span></a>
+      </nav>
+      <div class="side-foot">
+        <div class="user-card" id="user-card" hidden>
+          <span class="avatar" id="user-avatar">B</span>
+          <div><strong id="current-user"></strong><small id="current-role"></small></div>
+          <button type="button" class="icon-button user-logout" id="logout-rail" title="退出登录">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumbs"><span>工作台</span><i>/</i><strong id="crumb-current">定时任务</strong></div>
+        <div class="topbar-actions">
+          <span id="health" class="health-badge" data-state="loading">检查中</span>
+          <span class="today" id="today"></span>
+        </div>
+      </header>
+
+      <section class="page-head">
+        <div>
+          <h1>定时任务</h1>
+          <p class="page-sub" id="schedule-sub">按 cron 周期创建任务，服务重启后仍然生效</p>
+        </div>
+        <div class="page-actions">
+          <button type="button" class="button secondary" id="refresh">刷新</button>
+          <button type="button" class="button primary" id="create-open">新建定时任务</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-toolbar">
+          <label class="search-field">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4" stroke-linecap="round"/></svg>
+            <input id="schedule-search" type="search" placeholder="搜索任务名称或类型">
+          </label>
+        </div>
+        <div class="schedule-head">
+          <span>任务名称</span><span>类型</span><span>调度规则</span><span>下次执行</span><span>最近状态</span><span>操作</span>
+        </div>
+        <div id="schedule-list"></div>
+        <p class="empty-state" id="schedule-empty" hidden>还没有定时任务，点右上角新建。</p>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="create-dialog" id="schedule-dialog">
+    <form id="schedule-form" method="dialog">
+      <header class="dialog-head">
+        <div><p class="eyebrow" id="dialog-eyebrow">新建定时任务</p><h2 id="schedule-dialog-title">新建定时任务</h2></div>
+        <button type="button" class="icon-button" id="schedule-cancel" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <label class="field"><span class="field-label">任务名称</span><input id="schedule-name" placeholder="例如 竞品网页监控" required></label>
+        <label class="field"><span class="field-label">任务类型</span>
+          <select id="schedule-type">
+            <option value="WEB_DIGEST">网页资料整理</option>
+            <option value="REPO_CHECK">代码仓库体检</option>
+            <option value="WEB_ACCEPTANCE">网页应用验收</option>
+            <option value="MOCK">开发验证</option>
+          </select>
+        </label>
+        <div id="schedule-fields"></div>
+        <div class="field">
+          <span class="field-label">调度周期</span>
+          <div class="cron-builder">
+            <select id="cron-mode">
+              <option value="minutes">每 N 分钟</option>
+              <option value="hourly">每小时</option>
+              <option value="daily">每天几点</option>
+              <option value="weekly">每周几</option>
+            </select>
+            <input id="cron-every" type="number" min="1" max="59" value="30" aria-label="间隔分钟">
+            <input id="cron-hour" type="number" min="0" max="23" value="8" aria-label="小时">
+            <input id="cron-minute" type="number" min="0" max="59" value="0" aria-label="分钟">
+            <select id="cron-weekday">
+              <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option>
+              <option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="0">周日</option>
+            </select>
+          </div>
+          <p class="field-hint" id="cron-preview">cron：*/30 * * * *</p>
+        </div>
+        <p class="create-error" id="schedule-error" hidden></p>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" class="button secondary" id="schedule-cancel-2">取消</button>
+        <button type="submit" class="button primary" id="schedule-submit">创建</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog class="create-dialog history-dialog" id="history-dialog">
+    <header class="dialog-head">
+      <div><p class="eyebrow">执行历史</p><h2 id="history-title">定时任务</h2></div>
+      <button type="button" class="icon-button" id="history-close" aria-label="关闭">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div class="dialog-body"><div id="history-list" class="history-list"></div></div>
+  </dialog>
+
+  <script src="notifications.js?v=20261127-30"></script>
+  <script src="schedules.js?v=20261127-36"></script>
+</body>
+</html>

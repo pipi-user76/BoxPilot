@@ -45,13 +45,13 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 | SQLite 持久化 | 已接入 | 应用默认使用 SQLite 存储任务、步骤和产物索引 |
 | 账号与数据隔离 | 已完成 | 用户名/密码登录、scrypt 哈希、签名 Cookie，任务按 `owner_id` 隔离，管理员可查看全部 |
 | 服务器部署 | 已完成 | `deploy/bootstrap.sh` 一键安装，systemd 单进程托管，Caddy 反代与 HTTPS 模板 |
-| 10 至 15 个系统样例 | 进行中 | 已有 86 项自动化测试，尚需形成统一验收表和统计报告 |
+| 10 至 15 个系统样例 | 进行中 | 已有 117 项自动化测试，尚需形成统一验收表和统计报告 |
 
 当前已注册 `MOCK`、`CSV_ANALYSIS`、`WEB_DIGEST`、`REPO_CHECK` 和 `WEB_ACCEPTANCE`。未知任务类型会返回明确校验错误，不会生成伪成功任务。
 
 最近验证结果：
 
-- 86 项 Python 测试中，1 项真实沙箱集成测试默认跳过。
+- 117 项 Python 测试中，1 项真实沙箱集成测试默认跳过。
 - 登录链路已实测：未登录访问工作台 303 跳转登录页；管理员 alice 可见全部 8 条任务，新账号 bob 登录后列表为 0，直接访问 alice 的任务详情与打包接口均返回 404。
 - 真实 `WEB_DIGEST` 使用沙箱 Readability 去噪并识别列表条目，`books.toscrape.com` 抽出 20 条、268 词，产出 5 个文件（正文、条目 JSON、条目 CSV、整页截图、报告）。
 - 批量订阅一次提交多个地址，共享同一批次号；批次可在列表里筛选，详情里可一键重跑。
@@ -143,7 +143,7 @@ uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-预期结果：`Ran 86 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 85 项测试可在未启动 Docker 时执行。
+预期结果：`Ran 117 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 116 项测试可在未启动 Docker 时执行。
 
 运行真实沙箱集成测试：
 
@@ -173,6 +173,57 @@ $env:BOXPILOT_RUN_SANDBOX_TESTS='1'
 | `GET` | `/tasks/artifacts/archive?task_ids=a,b` | 批量打包下载，最多 50 个任务，按任务规范名分目录 |
 | `GET` | `/artifacts/{id}/download` | 下载已登记产物，`?inline=1` 供浏览器内联显示 |
 | `GET` | `/artifacts/{id}/preview` | 文本截断预览或图片预览地址 |
+| `GET` | `/schedules` | 当前用户可见的定时任务 |
+| `POST` | `/schedules` | 创建定时任务：`task_type`、`params`、五段 `cron`、`name` |
+| `PUT` | `/schedules/{id}` | 编辑名称、类型、参数与规则 |
+| `PATCH` | `/schedules/{id}` | 启用或暂停，重新启用时按当前时间计算下一次执行 |
+| `DELETE` | `/schedules/{id}` | 删除定时任务，不影响已创建的历史任务 |
+| `POST` | `/schedules/{id}/run` | 立即执行一次，返回新建任务 |
+| `GET` | `/schedules/{id}/runs` | 该定时任务的历史执行记录 |
+| `GET` | `/notifications` | 站内通知列表与未读数 |
+| `POST` | `/notifications/{id}/read` | 标记单条已读 |
+| `POST` | `/notifications/read-all` | 全部标记已读 |
+| `GET` | `/kb` | 当前用户的知识库列表 |
+| `POST` | `/kb` | 新建知识库：`{name, note}` |
+| `GET/POST` | `/kb/{id}/documents` | 文档列表 / 从任务或文本入库 |
+| `POST` | `/kb/{id}/documents/batch` | 从多个任务批量入库（最多 20） |
+| `DELETE` | `/kb/{id}/documents/{doc_id}` | 删除文档并清理向量 |
+| `POST` | `/kb/{id}/documents/{doc_id}/refresh` | 重新切片并刷新向量 |
+| `POST` | `/kb/{id}/ask` | RAG 问答：`{question, top_k}` → 回答与引用 |
+| `GET` | `/kb/{id}/messages` | 该知识库的问答历史 |
+
+## 定时任务与通知
+
+侧栏“定时任务”进入 `/ui/schedules.html`，和工作台同一套外壳：
+
+- 新建或编辑时选择模板、填写参数，再用“每 N 分钟 / 每小时 / 每天 / 每周”拼出 cron，下方实时显示五段表达式。
+- 列表展示任务名称、类型、规则、下次执行、最近状态与操作；点击名称打开右侧抽屉查看历史执行，每条都可以跳到原任务详情。
+- 调度使用 APScheduler，任务存进 SQLite 的 `schedules` 表，服务重启后继续；触发时先推进 `next_run_at` 再创建任务，避免长任务重复触发。
+- 任务结束、失败或超时都会写一条站内通知；右上角铃铛显示未读数，可单条或全部标记已读。
+
+## 知识库
+
+网页资料整理页顶部有“任务列表 / 我的知识库”两个 Tab，知识库是这个功能的升级入口：
+
+- 新建知识库（按主题区分），每个账号只能看到自己的知识库，管理员也不跨用户。
+- 在任务列表勾选网页整理任务，点“存入所选任务”；或在任务详情点“存入知识库”。
+- 入库时按 800 字切片，调用嵌入接口后写入 Chroma（默认 `data/chroma`），元数据保留任务、标题和来源链接。
+- 问答用当前知识库检索前 `top_k` 段，拼进提示词交给 LLM，回答下方可展开引用片段和原网页链接；问答历史随知识库保存。
+- 检索条数与相似度阈值可以在问答区用滑块调整；阈值调高只保留更相关的片段。
+- 除网页任务外，也可以直接上传 PDF、TXT、Markdown 入库；PDF 用 `pypdf` 提取文字，单文件上限 10 MB。
+- 问答区提供“导出对话”，把当前知识库的问答与引用整理成 Markdown 下载。
+- 文档支持删除、批量删除与“刷新向量”（重新切片并重建索引）。
+
+## AI 能力底座
+
+四块基础设施已经就位，具体 AI 功能可以在模板里按需调用：
+
+- **LLM 网关**：`backend/llm.py` 提供 `chat`、`chat_json`、`embed`，兼容 OpenAI 协议，带超时、重试、JSON 校验和 token 用量日志。未配置 `LLM_API_KEY` 时 `available()` 为假，调用方应降级。`LLM_TEMPERATURE` 可留空，推理类模型（如 kimi-k3）不接受该参数。
+- **定时任务**：`schedules` 表随 SQLite 迁移到 `user_version=3`；后台线程每 `SCHEDULE_POLL_SECONDS` 秒扫描一次，到期后创建普通任务并推进 `next_run_at`，进程重启不丢。
+- **向量检索**：`backend/rag.py` 把文本分块、调用嵌入接口、向量存 SQLite，检索用余弦相似度，可按 `task_id` 过滤。
+- **沙箱依赖**：`scripts/sandbox_extras.sh` 在容器内建独立虚拟环境并安装 `pandas`、`matplotlib`、`scikit-learn`，默认不随部署执行。
+
+对应环境变量：`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`、`LLM_EMBEDDING_MODEL`、`LLM_TIMEOUT_SECONDS`、`LLM_MAX_RETRIES`、`SCHEDULE_POLL_SECONDS`、`SCHEDULE_MAX_PER_TICK`。
 
 `GET /tasks` 返回 `{items, total, page, page_size, pages, counts}`；`counts` 始终统计全量任务，不受筛选条件影响。取消运行中的任务在“步骤之间”生效，当前步骤不会被强制中断。
 

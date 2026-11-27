@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     SANDBOX_TIMEOUT_SECONDS: int = 120
     SANDBOX_HEALTH_TIMEOUT_SECONDS: int = 5
     DATABASE_PATH: Path = Path("data/boxpilot.db")
+    CHROMA_PATH: Path = Path("data/chroma")
+    KB_UPLOAD_MAX_BYTES: int = 10 * 1024 * 1024
     ARTIFACT_ROOT: Path = Path("artifacts")
     MAX_ARTIFACT_BYTES: int = 20 * 1024 * 1024
     MAX_CSV_UPLOAD_BYTES: int = 5 * 1024 * 1024
@@ -54,6 +56,18 @@ class Settings(BaseSettings):
     SESSION_MAX_AGE_SECONDS: int = 7 * 24 * 3600
     SESSION_COOKIE_SECURE: bool = False
     AUTH_REQUIRED: bool = True
+    # LLM 网关：兼容 OpenAI 协议的任意服务；未配置 API Key 时调用方应自行降级。
+    LLM_BASE_URL: str = "https://api.openai.com/v1"
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = "gpt-4o-mini"
+    LLM_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    LLM_TIMEOUT_SECONDS: int = 60
+    LLM_MAX_RETRIES: int = 2
+    LLM_TEMPERATURE: float | None = None
+    LLM_MAX_OUTPUT_TOKENS: int = 2000
+    # 定时任务：后台线程按固定间隔扫描到期记录，不依赖外部 cron 服务。
+    SCHEDULE_POLL_SECONDS: int = 20
+    SCHEDULE_MAX_PER_TICK: int = 5
 
     model_config = SettingsConfigDict(
         env_file=".env",

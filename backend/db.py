@@ -7,7 +7,21 @@ import threading
 from datetime import datetime, timezone
 from typing import Protocol
 
-from backend.models import Artifact, StepStatus, TaskRecord, TaskStatus, TaskStep, TaskType, utc_now
+from backend.models import (
+    Artifact,
+    KbCitation,
+    KbDocumentRecord,
+    KbMessageRecord,
+    KnowledgeBaseRecord,
+    NotificationRecord,
+    ScheduleRecord,
+    StepStatus,
+    TaskRecord,
+    TaskStatus,
+    TaskStep,
+    TaskType,
+    utc_now,
+)
 
 
 class TaskStore(Protocol):
@@ -73,6 +87,92 @@ class TaskStore(Protocol):
 
     def get_artifact(self, artifact_id: str) -> tuple[Artifact, str] | None: ...
 
+    def create_schedule(
+        self,
+        task_type: TaskType,
+        params: dict,
+        cron: str,
+        next_run_at: datetime,
+        *,
+        owner_id: str | None = None,
+        name: str = "",
+    ) -> ScheduleRecord: ...
+
+    def list_schedules(self, owner_id: str | None = None) -> list[ScheduleRecord]: ...
+
+    def get_schedule(self, schedule_id: str) -> ScheduleRecord | None: ...
+
+    def update_schedule(
+        self,
+        schedule_id: str,
+        *,
+        name: str,
+        task_type: TaskType,
+        params: dict,
+        cron: str,
+        next_run_at: datetime,
+    ) -> ScheduleRecord | None: ...
+
+    def set_schedule_enabled(
+        self, schedule_id: str, enabled: bool, next_run_at: datetime | None = None
+    ) -> ScheduleRecord | None: ...
+
+    def delete_schedule(self, schedule_id: str) -> bool: ...
+
+    def due_schedules(self, now: datetime, limit: int = 5) -> list[ScheduleRecord]: ...
+
+    def mark_schedule_run(
+        self, schedule_id: str, ran_at: datetime, next_run_at: datetime, task_id: str
+    ) -> None: ...
+
+    def schedule_runs(self, schedule_id: str, limit: int = 20) -> list[TaskRecord]: ...
+
+    def create_notification(
+        self, user_id: str, task_id: str, task_type: TaskType, kind: str, title: str, body: str = ""
+    ) -> NotificationRecord: ...
+
+    def list_notifications(
+        self, user_id: str, *, limit: int = 20, unread_only: bool = False
+    ) -> list[NotificationRecord]: ...
+
+    def unread_notifications(self, user_id: str) -> int: ...
+
+    def mark_notification_read(self, notification_id: str, user_id: str) -> bool: ...
+
+    def mark_all_notifications_read(self, user_id: str) -> int: ...
+
+    def create_knowledge_base(self, name: str, note: str, owner_id: str) -> KnowledgeBaseRecord: ...
+
+    def list_knowledge_bases(self, owner_id: str) -> list[KnowledgeBaseRecord]: ...
+
+    def get_knowledge_base(self, kb_id: str) -> KnowledgeBaseRecord | None: ...
+
+    def delete_knowledge_base(self, kb_id: str) -> bool: ...
+
+    def add_kb_document(
+        self,
+        kb_id: str,
+        *,
+        title: str,
+        url: str,
+        content: str,
+        task_id: str | None = None,
+    ) -> KbDocumentRecord: ...
+
+    def list_kb_documents(self, kb_id: str) -> list[KbDocumentRecord]: ...
+
+    def get_kb_document(self, document_id: str) -> KbDocumentRecord | None: ...
+
+    def set_kb_chunk_count(self, document_id: str, count: int) -> None: ...
+
+    def delete_kb_document(self, document_id: str) -> bool: ...
+
+    def add_kb_message(
+        self, kb_id: str, question: str, answer: str, citations: list[KbCitation]
+    ) -> KbMessageRecord: ...
+
+    def list_kb_messages(self, kb_id: str, limit: int = 50) -> list[KbMessageRecord]: ...
+
 
 class InMemoryTaskStore:
     """独立测试可显式注入的内存实现。"""
@@ -82,6 +182,11 @@ class InMemoryTaskStore:
     def __init__(self) -> None:
         self._tasks: dict[str, TaskRecord] = {}
         self._artifacts: dict[str, Artifact] = {}
+        self._schedules: dict[str, ScheduleRecord] = {}
+        self._notifications: dict[str, NotificationRecord] = {}
+        self._knowledge_bases: dict[str, KnowledgeBaseRecord] = {}
+        self._kb_documents: dict[str, KbDocumentRecord] = {}
+        self._kb_messages: dict[str, KbMessageRecord] = {}
         # 后台调度线程与 HTTP 查询线程会并发访问，所有读写都经过同一把可重入锁。
         self._lock = threading.RLock()
 
@@ -305,3 +410,212 @@ class InMemoryTaskStore:
         if task is None:
             raise KeyError(task_id)
         return task
+
+    def create_schedule(
+        self,
+        task_type: TaskType,
+        params: dict,
+        cron: str,
+        next_run_at: datetime,
+        *,
+        owner_id: str | None = None,
+        name: str = "",
+    ) -> ScheduleRecord:
+        record = ScheduleRecord(
+            name=name,
+            task_type=task_type,
+            params=params,
+            cron=cron,
+            owner_id=owner_id,
+            next_run_at=next_run_at,
+        )
+        with self._lock:
+            self._schedules[record.id] = record
+            return record.model_copy(deep=True)
+
+    def list_schedules(self, owner_id: str | None = None) -> list[ScheduleRecord]:
+        with self._lock:
+            rows = [
+                item
+                for item in self._schedules.values()
+                if owner_id is None or item.owner_id == owner_id
+            ]
+        rows.sort(key=lambda item: item.next_run_at)
+        return [item.model_copy(deep=True) for item in rows]
+
+    def set_schedule_enabled(
+        self, schedule_id: str, enabled: bool, next_run_at: datetime | None = None
+    ) -> ScheduleRecord | None:
+        with self._lock:
+            record = self._schedules.get(schedule_id)
+            if record is None:
+                return None
+            record.enabled = enabled
+            if next_run_at is not None:
+                record.next_run_at = next_run_at
+            return record.model_copy(deep=True)
+
+    def delete_schedule(self, schedule_id: str) -> bool:
+        with self._lock:
+            return self._schedules.pop(schedule_id, None) is not None
+
+    def due_schedules(self, now: datetime, limit: int = 5) -> list[ScheduleRecord]:
+        with self._lock:
+            rows = [
+                item.model_copy(deep=True)
+                for item in self._schedules.values()
+                if item.enabled and item.next_run_at <= now
+            ]
+        rows.sort(key=lambda item: item.next_run_at)
+        return rows[:limit]
+
+    def mark_schedule_run(
+        self, schedule_id: str, ran_at: datetime, next_run_at: datetime, task_id: str
+    ) -> None:
+        with self._lock:
+            record = self._schedules.get(schedule_id)
+            if record is None:
+                return
+            record.last_run_at = ran_at
+            record.last_task_id = task_id
+            record.next_run_at = next_run_at
+
+    def schedule_runs(self, schedule_id: str, limit: int = 20) -> list[TaskRecord]:
+        with self._lock:
+            rows = [
+                item.model_copy(deep=True)
+                for item in self._tasks.values()
+                if item.params.get("_schedule_id") == schedule_id
+            ]
+        rows.sort(key=lambda item: item.created_at, reverse=True)
+        return rows[:limit]
+
+    def create_notification(
+        self, user_id: str, task_id: str, task_type: TaskType, kind: str, title: str, body: str = ""
+    ) -> NotificationRecord:
+        record = NotificationRecord(
+            user_id=user_id, task_id=task_id, task_type=task_type,
+            kind=kind, title=title, body=body,
+        )
+        with self._lock:
+            self._notifications[record.id] = record
+        return record
+
+    def list_notifications(
+        self, user_id: str, *, limit: int = 20, unread_only: bool = False
+    ) -> list[NotificationRecord]:
+        with self._lock:
+            rows = [
+                item.model_copy(deep=True)
+                for item in self._notifications.values()
+                if item.user_id == user_id and (not unread_only or item.read_at is None)
+            ]
+        rows.sort(key=lambda item: item.created_at, reverse=True)
+        return rows[:limit]
+
+    def unread_notifications(self, user_id: str) -> int:
+        with self._lock:
+            return sum(1 for item in self._notifications.values()
+                       if item.user_id == user_id and item.read_at is None)
+
+    def mark_notification_read(self, notification_id: str, user_id: str) -> bool:
+        with self._lock:
+            record = self._notifications.get(notification_id)
+            if record is None or record.user_id != user_id:
+                return False
+            if record.read_at is None:
+                record.read_at = utc_now()
+            return True
+
+    def mark_all_notifications_read(self, user_id: str) -> int:
+        changed = 0
+        with self._lock:
+            for item in self._notifications.values():
+                if item.user_id == user_id and item.read_at is None:
+                    item.read_at = utc_now()
+                    changed += 1
+        return changed
+    def get_schedule(self, schedule_id: str) -> ScheduleRecord | None:
+        with self._lock:
+            record = self._schedules.get(schedule_id)
+            return record.model_copy(deep=True) if record is not None else None
+    def update_schedule(
+        self, schedule_id, *, name, task_type, params, cron, next_run_at
+    ):
+        with self._lock:
+            record = self._schedules.get(schedule_id)
+            if record is None:
+                return None
+            record.name = name
+            record.task_type = task_type
+            record.params = params
+            record.cron = cron
+            record.next_run_at = next_run_at
+            return record.model_copy(deep=True)
+
+    # ---------- 知识库（私有，按 owner_id 隔离） ----------
+
+    def create_knowledge_base(self, name, note, owner_id):
+        record = KnowledgeBaseRecord(name=name, note=note, owner_id=owner_id)
+        with self._lock:
+            self._knowledge_bases[record.id] = record
+            return record.model_copy(deep=True)
+
+    def list_knowledge_bases(self, owner_id):
+        with self._lock:
+            items = [kb for kb in self._knowledge_bases.values() if kb.owner_id == owner_id]
+            return [kb.model_copy(deep=True) for kb in sorted(items, key=lambda kb: kb.created_at, reverse=True)]
+
+    def get_knowledge_base(self, kb_id):
+        with self._lock:
+            record = self._knowledge_bases.get(kb_id)
+            return record.model_copy(deep=True) if record is not None else None
+
+    def delete_knowledge_base(self, kb_id):
+        with self._lock:
+            if kb_id not in self._knowledge_bases:
+                return False
+            self._knowledge_bases.pop(kb_id, None)
+            for doc_id in [d.id for d in self._kb_documents.values() if d.kb_id == kb_id]:
+                self._kb_documents.pop(doc_id, None)
+            for msg_id in [m.id for m in self._kb_messages.values() if m.kb_id == kb_id]:
+                self._kb_messages.pop(msg_id, None)
+            return True
+
+    def add_kb_document(self, kb_id, *, title, url, content, task_id=None):
+        record = KbDocumentRecord(kb_id=kb_id, title=title, url=url, content=content, task_id=task_id)
+        with self._lock:
+            self._kb_documents[record.id] = record
+            return record.model_copy(deep=True)
+
+    def list_kb_documents(self, kb_id):
+        with self._lock:
+            items = [d for d in self._kb_documents.values() if d.kb_id == kb_id]
+            return [d.model_copy(deep=True) for d in sorted(items, key=lambda d: d.created_at, reverse=True)]
+
+    def get_kb_document(self, document_id):
+        with self._lock:
+            record = self._kb_documents.get(document_id)
+            return record.model_copy(deep=True) if record is not None else None
+
+    def set_kb_chunk_count(self, document_id, count):
+        with self._lock:
+            record = self._kb_documents.get(document_id)
+            if record is not None:
+                record.chunk_count = count
+
+    def delete_kb_document(self, document_id):
+        with self._lock:
+            return self._kb_documents.pop(document_id, None) is not None
+
+    def add_kb_message(self, kb_id, question, answer, citations):
+        record = KbMessageRecord(kb_id=kb_id, question=question, answer=answer, citations=list(citations))
+        with self._lock:
+            self._kb_messages[record.id] = record
+            return record.model_copy(deep=True)
+
+    def list_kb_messages(self, kb_id, limit=50):
+        with self._lock:
+            items = [m for m in self._kb_messages.values() if m.kb_id == kb_id]
+            items.sort(key=lambda m: m.created_at, reverse=True)
+            return [m.model_copy(deep=True) for m in items[:limit]]

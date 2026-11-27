@@ -205,3 +205,125 @@ class HealthResponse(BaseModel):
     app: str
     sandbox: dict[str, Any]
     store: str = "memory"
+
+
+class ScheduleCreate(BaseModel):
+    """创建定时任务：cron 使用标准五段表达式，参数与手动创建一致。"""
+
+    task_type: TaskType
+    params: dict[str, Any] = Field(default_factory=dict)
+    cron: str = Field(min_length=5, max_length=64)
+    name: str = Field(default="", max_length=60)
+
+
+class ScheduleUpdate(BaseModel):
+    enabled: bool
+
+
+class ScheduleRecord(BaseModel):
+    """持久化的定时任务；next_run_at 在每次触发后向前推进。"""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    name: str = ""
+    task_type: TaskType
+    params: dict[str, Any] = Field(default_factory=dict)
+    cron: str
+    enabled: bool = True
+    owner_id: str | None = None
+    next_run_at: datetime
+    last_run_at: datetime | None = None
+    last_task_id: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class NotificationRecord(BaseModel):
+    """站内通知：任务结束或报错时写入，按用户隔离。"""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    user_id: str
+    task_id: str
+    task_type: TaskType
+    kind: str = "success"
+    title: str
+    body: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+    read_at: datetime | None = None
+
+
+class NotificationList(BaseModel):
+    items: list[NotificationRecord]
+    unread: int
+
+
+class KnowledgeBaseCreate(BaseModel):
+    """新建知识库：名称必填，备注可选。"""
+
+    name: str = Field(min_length=1, max_length=80)
+    note: str = Field(default="", max_length=400)
+
+
+class KnowledgeBaseRecord(BaseModel):
+    """知识库元信息，按 owner_id 隔离。"""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    name: str
+    note: str = ""
+    owner_id: str
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class KbDocumentRecord(BaseModel):
+    """知识库中的一篇网页文档，正文保留用于重新切片。"""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    kb_id: str
+    task_id: str | None = None
+    title: str
+    url: str = ""
+    content: str = ""
+    chunk_count: int = 0
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class KbDocumentCreate(BaseModel):
+    """入库请求：既能从任务产物导入，也能直接贴正文。"""
+
+    task_id: str | None = None
+    title: str = Field(default="", max_length=200)
+    url: str = Field(default="", max_length=2048)
+    content: str = Field(default="", max_length=200000)
+
+
+class KbCitation(BaseModel):
+    index: int
+    document_id: str
+    title: str
+    url: str = ""
+    snippet: str
+
+
+class KbAskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+    top_k: int = Field(default=4, ge=1, le=10)
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class KbAnswer(BaseModel):
+    answer: str
+    citations: list[KbCitation]
+    message_id: str
+
+
+class KbMessageRecord(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    kb_id: str
+    question: str
+    answer: str
+    citations: list[KbCitation] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class KbBatchCreate(BaseModel):
+    """批量把多个网页整理任务加入同一知识库。"""
+
+    task_ids: list[str] = Field(min_length=1, max_length=20)

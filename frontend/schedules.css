@@ -1,0 +1,276 @@
+/* 定时任务页与全局通知铃铛的补充样式，沿用 styles.css 的令牌。 */
+
+.schedule-head,
+.schedule-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) 120px 120px 110px 96px 260px;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 16px;
+}
+
+.schedule-head {
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.schedule-row {
+  border-bottom: 1px solid #eef1f5;
+}
+
+.schedule-row:hover { background: #f8fafc; }
+
+.schedule-name {
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.schedule-name strong { font-size: 14px; color: var(--ink); }
+.schedule-name small { font-size: 11.5px; color: var(--muted); }
+
+.row-rule,
+.row-next,
+.row-status,
+.row-type { font-size: 12.5px; color: #5b6678; }
+
+.row-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.link-button.danger { color: var(--danger); }
+.link-button:hover { text-decoration: underline; }
+
+.cron-builder {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 8px;
+}
+
+.cron-builder input,
+.cron-builder select,
+.field input,
+.field select {
+  border: 1px solid #dfe3ea;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+}
+
+.history-list { display: grid; gap: 6px; }
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 12.5px;
+}
+
+.history-row:hover { background: var(--surface-soft); }
+
+.status-badge.neutral { background: #eef1f5; color: #5b6678; }
+.status-badge.neutral i { background: #98a2b3; }
+.status-badge.running { background: #fdf3e0; color: #8a5a12; }
+.status-badge.running i { background: #d69324; }
+
+@media (max-width: 1180px) {
+  .schedule-head, .schedule-row { grid-template-columns: minmax(0, 1.4fr) 110px 110px 90px 220px; }
+  .row-rule { display: none; }
+}
+
+@media (max-width: 900px) {
+  .schedule-head { display: none; }
+  .schedule-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+    padding: 14px 16px;
+  }
+  .row-type, .row-next { grid-column: 1; font-size: 12px; }
+  .row-status { grid-column: 2; grid-row: 1; }
+  .row-actions { grid-column: 1 / -1; }
+}
+
+/* 通知铃铛 */
+.notify { position: relative; }
+
+.notify-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: #4b5563;
+  cursor: pointer;
+}
+
+.notify-button:hover { background: var(--surface-soft); }
+
+.notify-dot {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #dc2626;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.notify-panel {
+  position: absolute;
+  right: 0;
+  top: 40px;
+  width: 320px;
+  max-height: 380px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 18px 36px rgba(16, 27, 45, 0.14);
+  z-index: 40;
+}
+
+.notify-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.notify-list { display: grid; }
+
+.notify-item {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f4f8;
+  color: inherit;
+  text-decoration: none;
+}
+
+.notify-item.unread { background: #f7faff; }
+.notify-item:hover { background: var(--surface-soft); }
+
+.notify-kind {
+  height: 20px;
+  border-radius: 6px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notify-kind.success { background: #e8f7f0; color: #0f766e; }
+.notify-kind.error { background: #fdeceb; color: #b42318; }
+
+.notify-body { display: grid; gap: 2px; min-width: 0; }
+.notify-body strong { font-size: 12.5px; color: var(--ink); }
+.notify-body small { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notify-empty { padding: 16px; margin: 0; color: var(--muted); font-size: 12.5px; }
+
+.app-shell.no-detail { grid-template-columns: 220px minmax(0, 1fr); }
+
+@media (max-width: 1240px) {
+  .app-shell.no-detail { grid-template-columns: 200px minmax(0, 1fr); }
+}
+
+@media (max-width: 820px) {
+  .app-shell.no-detail { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 弹窗骨架 */
+.create-dialog {
+  width: 460px;
+  max-width: calc(100vw - 32px);
+  padding: 20px 22px 18px;
+  border: 0;
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+}
+
+.create-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.dialog-head h2 {
+  margin: 2px 0 0;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.dialog-body {
+  display: grid;
+  gap: 12px;
+  max-height: 58vh;
+  overflow: auto;
+}
+
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 12.5px;
+  color: #3b4657;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.status-badge.success { background: #e8f7f0; color: #0f766e; }
+.status-badge.success i { background: #0f9d76; }
+.status-badge.danger { background: #fdeceb; color: #b42318; }
+.status-badge.danger i { background: #d24a3f; }

@@ -173,6 +173,17 @@ purge_tasks(statuses, older_than) -> list[str]
 | `GET` | `/artifacts/{artifact_id}/download` | 文件流，附件名带任务前缀；`?inline=1` 内联显示 |
 | `GET` | `/artifacts/{artifact_id}/preview` | `{kind,text,truncated,url,...}` |
 | `GET` | `/health` | 应用与沙箱健康状态 |
+| `GET` | `/schedules` | 当前用户可见的定时任务列表 |
+| `POST` | `/schedules` | `{task_type,params,cron,name}` → `ScheduleRecord`，201 |
+| `PATCH` | `/schedules/{id}` | `{enabled}`；重新启用时重算 `next_run_at` |
+| `DELETE` | `/schedules/{id}` | 删除定时任务，204 |
+
+定时任务说明：
+
+- `cron` 为标准五段表达式（分 时 日 月 周），支持 `*`、`*/n`、`a,b`、`a-b`；非法表达式返回 `422 INVALID_CRON`。
+- 触发时任务参数会带上 `_schedule_id`，该键以 `_` 开头，不参与创建幂等。
+- `next_run_at` 在触发前推进，避免长任务导致同一时间点重复触发；进程重启后按数据库中的时间继续。
+- 普通用户只能看到和操作自己的定时任务，管理员可见全部。
 
 说明：
 
@@ -192,6 +203,25 @@ purge_tasks(statuses, older_than) -> list[str]
   }
 }
 ```
+
+### 知识库
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/kb` | 当前用户的知识库 |
+| `POST` | `/kb` | `{name, note}`，201 |
+| `DELETE` | `/kb/{kb_id}` | 删除知识库、文档与向量 |
+| `GET/POST` | `/kb/{kb_id}/documents` | 文档列表 / `{task_id}` 或 `{title,url,content}` 入库 |
+| `POST` | `/kb/{kb_id}/documents/batch` | `{task_ids}` 批量入库 |
+| `DELETE` | `/kb/{kb_id}/documents/{doc_id}` | 删除单篇并清向量 |
+| `POST` | `/kb/{kb_id}/documents/{doc_id}/refresh` | 重新切片、重建向量 |
+| `POST` | `/kb/{kb_id}/ask` | `{question, top_k, min_score}` → `{answer, citations, message_id}` |
+| `POST` | `/kb/{kb_id}/upload` | multipart `file`，支持 `.pdf/.txt/.md`，返回文档记录 |
+| `GET` | `/kb/{kb_id}/messages` | 问答历史，含 citations |
+
+- 知识库、文档和问答历史存 SQLite（`user_version=5`）；向量存 Chroma，集合 `kb_chunks`，metadata 含 `kb_id/document_id/title/url`。
+- 所有 `/kb` 接口按 `owner_id` 隔离，跨用户访问统一 404；管理员不跨用户。
+- 入库优先读任务的 `article.md`，标题取任务结论里的页面标题；正文按 800 字、100 字重叠切片。
 
 ## 5. SandboxAdapter 契约
 

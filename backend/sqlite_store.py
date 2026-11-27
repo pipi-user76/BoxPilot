@@ -1,10 +1,26 @@
 """SQLite implementation of the shared TaskStore contract."""
 
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
+import json
 import sqlite3
 
-from backend.models import Artifact, StepStatus, TaskRecord, TaskStatus, TaskStep, utc_now
+from backend.models import (
+    Artifact,
+    KbCitation,
+    KbDocumentRecord,
+    KbMessageRecord,
+    KnowledgeBaseRecord,
+    NotificationRecord,
+    ScheduleRecord,
+    StepStatus,
+    TaskRecord,
+    TaskStatus,
+    TaskStep,
+    TaskType,
+    utc_now,
+)
 
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tasks (
@@ -42,7 +58,51 @@ MIGRATION_V2 = (
     'CREATE INDEX IF NOT EXISTS task_owner ON tasks(owner_id, created_at DESC)',
 )
 
-SCHEMA_VERSION = 2
+# v2 -> v3：加入定时任务表。next_run_at 用 ISO 字符串，便于直接按时间排序。
+MIGRATION_V3 = (
+    """CREATE TABLE IF NOT EXISTS schedules (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
+        task_type TEXT NOT NULL, cron TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+        owner_id TEXT, next_run_at TEXT NOT NULL, last_run_at TEXT,
+        last_task_id TEXT, payload TEXT NOT NULL
+    )""",
+    'CREATE INDEX IF NOT EXISTS schedule_due ON schedules(enabled, next_run_at)',
+    'CREATE INDEX IF NOT EXISTS schedule_owner ON schedules(owner_id)',
+)
+
+MIGRATION_V4 = (
+    """CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, task_id TEXT NOT NULL,
+        task_type TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'success',
+        title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL, read_at TEXT
+    )""",
+    'CREATE INDEX IF NOT EXISTS notification_user ON notifications(user_id, created_at)',
+    'CREATE INDEX IF NOT EXISTS notification_unread ON notifications(user_id, read_at)',
+)
+
+MIGRATION_V5 = (
+    """CREATE TABLE IF NOT EXISTS knowledge_bases (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+        owner_id TEXT NOT NULL, created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS kb_documents (
+        id TEXT PRIMARY KEY, kb_id TEXT NOT NULL, task_id TEXT,
+        title TEXT NOT NULL, url TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL DEFAULT '', chunk_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS kb_messages (
+        id TEXT PRIMARY KEY, kb_id TEXT NOT NULL,
+        question TEXT NOT NULL, answer TEXT NOT NULL,
+        citations TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL
+    )""",
+    'CREATE INDEX IF NOT EXISTS kb_owner ON knowledge_bases(owner_id, created_at)',
+    'CREATE INDEX IF NOT EXISTS kb_doc_kb ON kb_documents(kb_id, created_at)',
+    'CREATE INDEX IF NOT EXISTS kb_msg_kb ON kb_messages(kb_id, created_at)',
+)
+
+SCHEMA_VERSION = 5
 
 
 class SQLiteTaskStore:
@@ -77,6 +137,18 @@ class SQLiteTaskStore:
             if version == 1:
                 for statement in MIGRATION_V2:
                     db.execute(statement)
+                version = 2
+            if version == 2:
+                for statement in MIGRATION_V3:
+                    db.execute(statement)
+                version = 3
+            if version == 3:
+                for statement in MIGRATION_V4:
+                    db.execute(statement)
+                version = 4
+            if version == 4:
+                for statement in MIGRATION_V5:
+                    db.execute(statement)
                 db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
                 return
             if version != 0 or db.execute(
@@ -84,6 +156,12 @@ class SQLiteTaskStore:
             ).fetchone():
                 raise RuntimeError(f'无法使用此数据库结构：{self.path}。请配置新的 DATABASE_PATH。')
             for statement in SCHEMA:
+                db.execute(statement)
+            for statement in MIGRATION_V3:
+                db.execute(statement)
+            for statement in MIGRATION_V4:
+                db.execute(statement)
+            for statement in MIGRATION_V5:
                 db.execute(statement)
             db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
 
@@ -274,6 +352,83 @@ class SQLiteTaskStore:
                 return Artifact.model_validate_json(row['payload']), row['task_id']
         return None
 
+    @staticmethod
+    def _schedule_from_row(row) -> ScheduleRecord:
+        return ScheduleRecord.model_validate_json(row['payload'])
+
+    def create_schedule(
+        self, task_type, params, cron, next_run_at, *, owner_id=None, name=''
+    ):
+        record = ScheduleRecord(
+            name=name, task_type=task_type, params=params, cron=cron,
+            owner_id=owner_id, next_run_at=next_run_at,
+        )
+        with self._connection(write=True) as db:
+            db.execute(
+                """INSERT INTO schedules
+                (id, name, task_type, cron, enabled, owner_id, next_run_at, last_run_at, last_task_id, payload)
+                VALUES (?, ?, ?, ?, 1, ?, ?, NULL, NULL, ?)""",
+                (record.id, record.name, record.task_type.value, record.cron, record.owner_id,
+                 record.next_run_at.isoformat(timespec='microseconds'), record.model_dump_json()),
+            )
+        return record
+
+    def list_schedules(self, owner_id=None):
+        sql = 'SELECT payload FROM schedules'
+        params: tuple = ()
+        if owner_id is not None:
+            sql += ' WHERE owner_id=?'
+            params = (owner_id,)
+        sql += ' ORDER BY next_run_at, id'
+        with self._connection() as db:
+            return [self._schedule_from_row(row) for row in db.execute(sql, params)]
+
+    def set_schedule_enabled(self, schedule_id, enabled, next_run_at=None):
+        with self._connection(write=True) as db:
+            row = db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone()
+            if row is None:
+                return None
+            record = self._schedule_from_row(row)
+            record.enabled = enabled
+            if next_run_at is not None:
+                record.next_run_at = next_run_at
+            db.execute(
+                'UPDATE schedules SET enabled=?, next_run_at=?, payload=? WHERE id=?',
+                (int(enabled), record.next_run_at.isoformat(timespec='microseconds'),
+                 record.model_dump_json(), schedule_id),
+            )
+            return record
+
+    def delete_schedule(self, schedule_id):
+        with self._connection(write=True) as db:
+            cursor = db.execute('DELETE FROM schedules WHERE id=?', (schedule_id,))
+        return cursor.rowcount > 0
+
+    def due_schedules(self, now, limit=5):
+        with self._connection() as db:
+            rows = db.execute(
+                'SELECT payload FROM schedules WHERE enabled=1 AND next_run_at<=? '
+                'ORDER BY next_run_at, id LIMIT ?',
+                (now.isoformat(timespec='microseconds'), limit),
+            )
+            return [self._schedule_from_row(row) for row in rows]
+
+    def mark_schedule_run(self, schedule_id, ran_at, next_run_at, task_id):
+        with self._connection(write=True) as db:
+            row = db.execute('SELECT payload FROM schedules WHERE id=?', (schedule_id,)).fetchone()
+            if row is None:
+                return
+            record = self._schedule_from_row(row)
+            record.last_run_at = ran_at
+            record.last_task_id = task_id
+            record.next_run_at = next_run_at
+            db.execute(
+                'UPDATE schedules SET next_run_at=?, last_run_at=?, last_task_id=?, payload=? WHERE id=?',
+                (next_run_at.isoformat(timespec='microseconds'),
+                 ran_at.isoformat(timespec='microseconds'), task_id,
+                 record.model_dump_json(), schedule_id),
+            )
+
     def recover_interrupted(self):
         """Called at single-worker startup; unfinished operations can be retried manually."""
         with self._connection() as db:
@@ -283,3 +438,209 @@ class SQLiteTaskStore:
         for task_id in ids:
             self.finish_task(task_id, TaskStatus.FAILED, None, 'SERVICE_RESTARTED',
                              '服务重启中断了任务，可以手动重试')
+
+    def schedule_runs(self, schedule_id, limit=20):
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT * FROM tasks WHERE json_extract(payload, '$.params._schedule_id') = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (schedule_id, limit),
+            ).fetchall()
+            return self._task_models(db, rows)
+
+    def create_notification(self, user_id, task_id, task_type, kind, title, body=""):
+        record = NotificationRecord(
+            user_id=user_id, task_id=task_id, task_type=task_type,
+            kind=kind, title=title, body=body,
+        )
+        with self._connection(write=True) as db:
+            db.execute(
+                "INSERT INTO notifications (id,user_id,task_id,task_type,kind,title,body,created_at,read_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (record.id, record.user_id, record.task_id, record.task_type.value,
+                 record.kind, record.title, record.body,
+                 record.created_at.isoformat(timespec='microseconds'), None),
+            )
+        return record
+
+    def _notification_from_row(self, row):
+        return NotificationRecord(
+            id=row['id'], user_id=row['user_id'], task_id=row['task_id'],
+            task_type=TaskType(row['task_type']), kind=row['kind'],
+            title=row['title'], body=row['body'],
+            created_at=datetime.fromisoformat(row['created_at']),
+            read_at=datetime.fromisoformat(row['read_at']) if row['read_at'] else None,
+        )
+
+    def list_notifications(self, user_id, *, limit=20, unread_only=False):
+        sql = "SELECT * FROM notifications WHERE user_id=?"
+        params = [user_id]
+        if unread_only:
+            sql += " AND read_at IS NULL"
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as db:
+            rows = db.execute(sql, params).fetchall()
+        return [self._notification_from_row(row) for row in rows]
+
+    def unread_notifications(self, user_id):
+        with self._connection() as db:
+            return db.execute(
+                "SELECT count(*) FROM notifications WHERE user_id=? AND read_at IS NULL",
+                (user_id,),
+            ).fetchone()[0]
+
+    def mark_notification_read(self, notification_id, user_id):
+        with self._connection(write=True) as db:
+            cursor = db.execute(
+                "UPDATE notifications SET read_at=? WHERE id=? AND user_id=? AND read_at IS NULL",
+                (utc_now().isoformat(timespec='microseconds'), notification_id, user_id),
+            )
+            if cursor.rowcount:
+                return True
+            existing = db.execute(
+                "SELECT 1 FROM notifications WHERE id=? AND user_id=?", (notification_id, user_id)
+            ).fetchone()
+            return existing is not None
+
+    def mark_all_notifications_read(self, user_id):
+        with self._connection(write=True) as db:
+            cursor = db.execute(
+                "UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL",
+                (utc_now().isoformat(timespec='microseconds'), user_id),
+            )
+            return cursor.rowcount
+
+    def get_schedule(self, schedule_id):
+        with self._connection() as db:
+            row = db.execute('SELECT payload FROM schedules WHERE id=?', (schedule_id,)).fetchone()
+        return self._schedule_from_row(row) if row is not None else None
+
+    def update_schedule(
+        self, schedule_id, *, name, task_type, params, cron, next_run_at
+    ):
+        with self._connection(write=True) as db:
+            row = db.execute('SELECT payload FROM schedules WHERE id=?', (schedule_id,)).fetchone()
+            if row is None:
+                return None
+            record = self._schedule_from_row(row)
+            record.name = name
+            record.task_type = task_type
+            record.params = params
+            record.cron = cron
+            record.next_run_at = next_run_at
+            db.execute(
+                'UPDATE schedules SET name=?, task_type=?, cron=?, next_run_at=?, payload=? WHERE id=?',
+                (name, task_type.value, cron,
+                 next_run_at.isoformat(timespec='microseconds'),
+                 record.model_dump_json(), schedule_id),
+            )
+            return record
+
+    # ---------- 知识库 ----------
+
+    def create_knowledge_base(self, name, note, owner_id):
+        record = KnowledgeBaseRecord(name=name, note=note, owner_id=owner_id)
+        with self._connection(write=True) as db:
+            db.execute(
+                'INSERT INTO knowledge_bases (id, name, note, owner_id, created_at) VALUES (?,?,?,?,?)',
+                (record.id, record.name, record.note, record.owner_id, record.created_at.isoformat()),
+            )
+        return record
+
+    def list_knowledge_bases(self, owner_id):
+        with self._connection() as db:
+            rows = db.execute(
+                'SELECT * FROM knowledge_bases WHERE owner_id = ? ORDER BY created_at DESC',
+                (owner_id,),
+            ).fetchall()
+        return [self._kb_from_row(row) for row in rows]
+
+    def get_knowledge_base(self, kb_id):
+        with self._connection() as db:
+            row = db.execute('SELECT * FROM knowledge_bases WHERE id = ?', (kb_id,)).fetchone()
+        return self._kb_from_row(row) if row is not None else None
+
+    def delete_knowledge_base(self, kb_id):
+        with self._connection(write=True) as db:
+            db.execute('DELETE FROM kb_documents WHERE kb_id = ?', (kb_id,))
+            db.execute('DELETE FROM kb_messages WHERE kb_id = ?', (kb_id,))
+            cursor = db.execute('DELETE FROM knowledge_bases WHERE id = ?', (kb_id,))
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def _kb_from_row(row):
+        return KnowledgeBaseRecord(
+            id=row['id'], name=row['name'], note=row['note'],
+            owner_id=row['owner_id'], created_at=datetime.fromisoformat(row['created_at']),
+        )
+
+    @staticmethod
+    def _kb_doc_from_row(row):
+        return KbDocumentRecord(
+            id=row['id'], kb_id=row['kb_id'], task_id=row['task_id'],
+            title=row['title'], url=row['url'], content=row['content'],
+            chunk_count=row['chunk_count'], created_at=datetime.fromisoformat(row['created_at']),
+        )
+
+    def add_kb_document(self, kb_id, *, title, url, content, task_id=None):
+        record = KbDocumentRecord(
+            kb_id=kb_id, title=title, url=url, content=content, task_id=task_id,
+        )
+        with self._connection(write=True) as db:
+            db.execute(
+                'INSERT INTO kb_documents (id, kb_id, task_id, title, url, content, chunk_count, created_at) '
+                'VALUES (?,?,?,?,?,?,?,?)',
+                (record.id, kb_id, task_id, title, url, content, 0, record.created_at.isoformat()),
+            )
+        return record
+
+    def list_kb_documents(self, kb_id):
+        with self._connection() as db:
+            rows = db.execute(
+                'SELECT * FROM kb_documents WHERE kb_id = ? ORDER BY created_at DESC',
+                (kb_id,),
+            ).fetchall()
+        return [self._kb_doc_from_row(row) for row in rows]
+
+    def get_kb_document(self, document_id):
+        with self._connection() as db:
+            row = db.execute('SELECT * FROM kb_documents WHERE id = ?', (document_id,)).fetchone()
+        return self._kb_doc_from_row(row) if row is not None else None
+
+    def set_kb_chunk_count(self, document_id, count):
+        with self._connection(write=True) as db:
+            db.execute('UPDATE kb_documents SET chunk_count = ? WHERE id = ?', (count, document_id))
+
+    def delete_kb_document(self, document_id):
+        with self._connection(write=True) as db:
+            cursor = db.execute('DELETE FROM kb_documents WHERE id = ?', (document_id,))
+            return cursor.rowcount > 0
+
+    def add_kb_message(self, kb_id, question, answer, citations):
+        record = KbMessageRecord(kb_id=kb_id, question=question, answer=answer, citations=list(citations))
+        with self._connection(write=True) as db:
+            db.execute(
+                'INSERT INTO kb_messages (id, kb_id, question, answer, citations, created_at) VALUES (?,?,?,?,?,?)',
+                (
+                    record.id, kb_id, question, answer,
+                    json.dumps([c.model_dump() for c in citations], ensure_ascii=False),
+                    record.created_at.isoformat(),
+                ),
+            )
+        return record
+
+    def list_kb_messages(self, kb_id, limit=50):
+        with self._connection() as db:
+            rows = db.execute(
+                'SELECT * FROM kb_messages WHERE kb_id = ? ORDER BY created_at DESC LIMIT ?',
+                (kb_id, limit),
+            ).fetchall()
+        return [
+            KbMessageRecord(
+                id=row['id'], kb_id=row['kb_id'], question=row['question'], answer=row['answer'],
+                citations=[KbCitation(**c) for c in json.loads(row['citations'])],
+                created_at=datetime.fromisoformat(row['created_at']),
+            )
+            for row in rows
+        ]

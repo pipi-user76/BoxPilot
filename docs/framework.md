@@ -9,7 +9,12 @@ BoxPilot/
 ├── backend/
 │   ├── main.py                 FastAPI 应用、静态页面挂载和公共路由装配
 │   ├── db.py                   TaskStore 契约和内存实现（SQLite 见 sqlite_store.py）
-│   ├── sqlite_store.py         SQLite 持久化、schema 迁移到 v2 与重启恢复
+│   ├── sqlite_store.py         SQLite 持久化、schema 迁移到 v3 与重启恢复
+│   ├── cron.py                 五段 cron 解析与下一次执行时间
+│   ├── schedules.py            定时任务扫描线程，到期后创建普通任务
+│   ├── routes_schedules.py     定时任务增删改查与用户隔离
+│   ├── llm.py                  OpenAI 兼容网关：对话、JSON、嵌入与重试
+│   ├── rag.py                  文本分块、向量入库与余弦检索
 │   ├── auth.py                 密码哈希与会话签名
 │   ├── auth_store.py           用户表访问（SQLite 与内存实现）
 │   ├── routes_auth.py          登录、登出、首次注册与建号
@@ -40,6 +45,7 @@ BoxPilot/
 ├── tests/                      单元测试、进阶用例和真实沙箱集成测试
 │   └── support.py              工作区临时目录辅助（避开 Windows 沙箱权限限制）
 ├── samples/                    样例输入
+├── scripts/                    建库、建号、沙箱扩展依赖脚本
 ├── artifacts/                  程序运行产物
 ├── logs/                       结构化日志输出（不提交）
 ├── docs/                       接口、框架和验收文档
@@ -72,4 +78,4 @@ BoxPilot/
 - 调度器输出 JSON Lines 日志，前端展示“任务结论”和重试来源。
 - 任务默认持久化到 SQLite（`user_version=2`：`tasks`/`steps`/`artifacts`/`users`），支持跨进程重启恢复与按用户隔离。
 - 需要登录才能访问任务；管理员可查看全部，普通用户只看到自己的任务。
-- 自动化测试 86 项，其中真实沙箱集成测试默认跳过，需显式开启。
+- 自动化测试 117 项，其中真实沙箱集成测试默认跳过，需显式开启。
