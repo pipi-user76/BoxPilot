@@ -82,6 +82,8 @@ curl -s http://127.0.0.1:8000/health
 
 ## 四、装一个 80 端口的入口
 
+优先用 Caddy：
+
 ```bash
 apt-get install -y caddy
 cat >/etc/caddy/Caddyfile <<'EOF'
@@ -92,6 +94,32 @@ cat >/etc/caddy/Caddyfile <<'EOF'
 EOF
 systemctl enable --now caddy
 systemctl reload caddy
+curl -I http://127.0.0.1/
+```
+
+Ubuntu 22.04 的默认源里没有 `caddy` 包，装不上就改用系统自带的 nginx：
+
+```bash
+apt-get install -y nginx
+cat >/etc/nginx/sites-available/boxpilot <<'EOF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    client_max_body_size 20m;
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+ln -sf /etc/nginx/sites-available/boxpilot /etc/nginx/sites-enabled/boxpilot
+rm -f /etc/nginx/sites-enabled/default
+systemctl enable --now nginx
+systemctl reload nginx
 curl -I http://127.0.0.1/
 ```
 
