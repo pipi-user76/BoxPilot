@@ -1,128 +1,205 @@
-<!-- 文件职责：任务工作台页面，由 task_list.js 负责搜索、分页、批量清理、预览和轮询。 -->
+<!-- 文件职责：任务工作台。带 ?type= 时是单个功能的独立页面，创建任务使用悬浮框。 -->
 <!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BoxPilot 任务工作台</title>
-  <link rel="stylesheet" href="styles.css?v=20261126">
+  <link rel="stylesheet" href="styles.css?v=20261127-22">
 </head>
 <body>
-  <header class="app-header">
-    <div class="header-inner">
-      <div>
-        <p class="product-mark">BOXPILOT</p>
-        <h1>任务工作台</h1>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div>
+          <strong>BOXPILOT</strong>
+          <small>任务执行工作台</small>
+        </div>
       </div>
-      <div class="header-actions">
-        <span id="current-user" class="user-chip" hidden></span>
-        <a id="users-link" class="button ghost" href="users.html" hidden>账号</a>
-        <button id="logout" class="button ghost" type="button" hidden>退出</button>
-        <span id="health" class="health-badge" data-state="loading">检查环境</span>
-        <a class="button secondary" href="create_task.html">创建任务</a>
-        <button id="refresh" class="button" type="button">刷新</button>
-      </div>
-    </div>
-  </header>
 
-  <main class="workspace">
-    <!-- 概览区只显示聚合数字，详细状态在任务列表中查看。 -->
-    <section class="summary-band" aria-label="任务概览">
-      <div class="metric">
-        <span class="metric-label">全部任务</span>
-        <strong id="task-count">0</strong>
-      </div>
-      <div class="metric">
-        <span class="metric-label">运行中</span>
-        <strong id="running-count">0</strong>
-      </div>
-      <div class="metric">
-        <span class="metric-label">成功</span>
-        <strong id="success-count">0</strong>
-      </div>
-      <div class="metric">
-        <span class="metric-label">失败</span>
-        <strong id="failed-count">0</strong>
-      </div>
-    </section>
+      <nav class="side-nav" aria-label="功能导航">
+        <p class="side-title">工作空间</p>
+        <a id="nav-all" class="side-link with-icon" href="task_list.html">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          <span>全部任务</span>
+          <em id="nav-total">0</em>
+        </a>
 
-    <section class="task-layout">
-      <div class="task-panel">
-        <div class="section-heading">
+        <p class="side-title">功能</p>
+        <a class="side-link with-icon feature-link" data-type="WEB_DIGEST" href="task_list.html?type=WEB_DIGEST">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.2 3.6 8.5S14.4 18.2 12 20.5C9.6 18.2 8.4 15.3 8.4 12S9.6 5.8 12 3.5Z"/></svg>
+          <span>网页资料整理</span>
+        </a>
+        <a class="side-link with-icon feature-link" data-type="CSV_ANALYSIS" href="task_list.html?type=CSV_ANALYSIS">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M9 9.5v10M15 9.5v10"/></svg>
+          <span>CSV 数据分析</span>
+        </a>
+        <a class="side-link with-icon feature-link" data-type="REPO_CHECK" href="task_list.html?type=REPO_CHECK">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
+          <span>代码仓库体检</span>
+        </a>
+        <a class="side-link with-icon feature-link" data-type="WEB_ACCEPTANCE" href="task_list.html?type=WEB_ACCEPTANCE">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12 2.4 2.4 4.6-5"/></svg>
+          <span>网页应用验收</span>
+        </a>
+
+        <p class="side-title">账号</p>
+        <a id="users-link" class="side-link with-icon" href="users.html" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19a6 6 0 0 1 12 0M16 5.5a3 3 0 0 1 0 5.6M18.5 19a5.5 5.5 0 0 0-3-4.9"/></svg>
+          <span>账号管理</span>
+        </a>
+      </nav>
+
+      <div class="side-foot">
+        <div class="user-card" id="user-card" hidden>
+          <span id="user-avatar" class="avatar">B</span>
+          <div class="user-card-text">
+            <strong id="current-user">账号</strong>
+            <small id="current-role">成员</small>
+          </div>
+          <button id="logout-rail" class="user-logout" type="button" title="退出登录" aria-label="退出登录">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12H4m4-4-4 4 4 4M14 4h5v16h-5"/></svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="crumbs">
+          <span>工作台</span>
+          <span class="crumb-sep">/</span>
+          <strong id="crumb-current">全部任务</strong>
+        </div>
+        <div class="topbar-actions">
+          <span id="health" class="health-badge" data-state="loading">检查环境</span>
+          <span id="today" class="today"></span>
+        </div>
+      </header>
+
+      <main class="content">
+        <div class="page-head">
           <div>
-            <h2>任务列表</h2>
-            <p id="last-updated">等待加载</p>
+            <h1 id="page-title">全部任务</h1>
+            <p id="page-subtitle">正在加载任务…</p>
           </div>
-          <div class="list-toolbar">
-            <label class="inline-control search-control">
-              <span>搜索</span>
-              <input id="task-search" type="search" placeholder="任务 ID、类型或参数" autocomplete="off">
-            </label>
-            <label class="inline-control">
-              <span>状态</span>
-              <select id="status-filter">
-                <option value="">全部</option>
-                <option value="PENDING">等待中</option>
-                <option value="RUNNING">运行中</option>
-                <option value="SUCCESS">成功</option>
-                <option value="FAILED">失败</option>
-                <option value="TIMEOUT">超时</option>
-                <option value="CANCELLED">已取消</option>
-              </select>
-            </label>
-            <label class="inline-control">
-              <span>每页</span>
-              <select id="page-size">
-                <option value="10">10</option>
-                <option value="20" selected>20</option>
-                <option value="50">50</option>
-              </select>
-            </label>
+          <div class="page-actions">
+            <button id="refresh" class="button secondary" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+              刷新
+            </button>
+            <button id="create-open" class="button primary" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              创建任务
+            </button>
           </div>
         </div>
 
-        <!-- 批量操作条常驻显示，未选中时按钮禁用，避免用户找不到入口。 -->
-        <div id="selection-bar" class="selection-bar">
-          <label class="checkbox-inline">
-            <input id="select-page" type="checkbox">
-            <span>全选本页</span>
-          </label>
-          <span id="selection-count">已选 0 项</span>
-          <div class="selection-actions">
-            <button id="download-selected" class="button secondary" type="button" disabled>下载所选</button>
-            <button id="batch-delete" class="button danger" type="button" disabled>批量删除</button>
-            <button id="cleanup" class="button secondary" type="button">清理 7 天前记录</button>
+        <div class="tabs" role="tablist" aria-label="按状态筛选">
+          <button id="tab-all" class="tab is-active" type="button" data-status="">全部<span class="tab-count" id="count-all">0</span></button>
+          <button id="tab-running" class="tab" type="button" data-status="RUNNING">运行中<span class="tab-count" id="count-running">0</span></button>
+          <button id="tab-success" class="tab" type="button" data-status="SUCCESS">成功<span class="tab-count" id="count-success">0</span></button>
+          <button id="tab-failed" class="tab" type="button" data-status="FAILED">失败<span class="tab-count" id="count-failed">0</span></button>
+          <button id="tab-cancelled" class="tab" type="button" data-status="CANCELLED">已取消<span class="tab-count" id="count-cancelled">0</span></button>
+        </div>
+
+        <section class="panel">
+          <div class="toolbar">
+            <label class="search-field">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+              <input id="task-search" type="search" placeholder="搜索任务 ID、类型或参数" autocomplete="off" aria-label="搜索任务">
+            </label>
+            <div class="toolbar-right">
+              <label class="inline-control">
+                <span>每页</span>
+                <select id="page-size" aria-label="每页数量">
+                  <option value="10">10</option>
+                  <option value="20" selected>20</option>
+                  <option value="50">50</option>
+                </select>
+              </label>
+              <button id="cleanup" class="button ghost small" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M7 7l1 12h8l1-12"/></svg>
+                清理历史
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div id="task-list" class="task-list" aria-live="polite"></div>
-        <div id="empty-state" class="empty-state" hidden>
-          <strong>暂无任务</strong>
-          <span>创建任务后将在这里显示状态和产物。</span>
-        </div>
+          <div id="selection-bar" class="selection-bar">
+            <label class="checkbox-inline">
+              <input id="select-page" type="checkbox">
+              <span>全选本页</span>
+            </label>
+            <span id="selection-count" class="muted">已选 0 项</span>
+            <div class="selection-actions">
+              <button id="download-selected" class="button secondary small" type="button" disabled>下载所选</button>
+              <button id="batch-delete" class="button danger small" type="button" disabled>批量删除</button>
+            </div>
+          </div>
 
-        <nav id="pagination" class="pagination" aria-label="任务分页">
-          <button id="page-prev" class="button secondary" type="button">上一页</button>
-          <span id="page-info">第 1 / 1 页 · 共 0 项</span>
-          <button id="page-next" class="button secondary" type="button">下一页</button>
-        </nav>
+          <div class="table-head" aria-hidden="true">
+            <span></span>
+            <span>任务</span>
+            <span>类型</span>
+            <span>步骤</span>
+            <span>创建时间</span>
+            <span>状态</span>
+            <span></span>
+          </div>
+
+          <div id="task-list" class="task-list" role="list" aria-live="polite"></div>
+          <div id="empty-state" class="empty-state" hidden>
+            <strong>暂无任务</strong>
+            <span>创建任务后将在这里显示状态和产物。</span>
+          </div>
+
+          <nav id="pagination" class="pagination" aria-label="任务分页">
+            <span id="page-info">第 1 / 1 页 · 共 0 项</span>
+            <div class="pagination-actions">
+              <button id="page-prev" class="page-arrow" type="button" aria-label="上一页">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>
+              </button>
+              <button id="page-next" class="page-arrow" type="button" aria-label="下一页">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg>
+              </button>
+            </div>
+          </nav>
+        </section>
+      </main>
+    </div>
+
+    <aside id="detail-panel" class="detail-panel" aria-label="任务详情">
+      <button id="detail-close" class="icon-button detail-close" type="button" aria-label="关闭详情">×</button>
+      <div class="detail-placeholder">
+        <strong>选择一个任务</strong>
+        <span>查看执行步骤、错误信息和可下载产物。</span>
       </div>
+    </aside>
+  </div>
 
-      <!-- 详情区由 JavaScript 动态填充，避免页面刷新打断轮询。 -->
-      <aside id="detail-panel" class="detail-panel" aria-label="任务详情">
-        <div class="detail-placeholder">
-          <strong>选择一个任务</strong>
-          <span>查看执行步骤、错误信息和可下载产物。</span>
+  <dialog id="create-dialog" class="create-dialog">
+    <form id="create-form" method="dialog">
+      <div class="preview-header">
+        <div>
+          <p class="eyebrow">新建任务</p>
+          <h2 id="create-title">创建任务</h2>
         </div>
-      </aside>
-    </section>
-  </main>
+        <button id="create-close" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <div id="create-fields" class="create-fields"></div>
+      <p id="create-error" class="create-error" hidden></p>
+      <div class="create-footer">
+        <button id="create-cancel" class="button secondary" type="button">取消</button>
+        <button id="create-submit" class="button primary" type="submit">提交任务</button>
+      </div>
+    </form>
+  </dialog>
 
-  <!-- 预览使用原生 dialog，文本与图片都不离开当前页面。 -->
   <dialog id="preview-dialog" class="preview-dialog">
     <div class="preview-header">
       <div>
-        <p class="product-mark">产物预览</p>
+        <p class="eyebrow">产物预览</p>
         <h2 id="preview-title">预览</h2>
       </div>
       <button id="preview-close" class="icon-button" type="button" aria-label="关闭预览">×</button>
@@ -130,10 +207,11 @@
     <div id="preview-body" class="preview-body"></div>
     <div class="preview-footer">
       <span id="preview-meta"></span>
-      <a id="preview-download" class="button secondary" href="#" download>下载文件</a>
+      <a id="preview-download" class="button secondary small" href="#" download>下载文件</a>
     </div>
   </dialog>
 
-  <script src="task_list.js?v=20261126"></script>
+  <script src="task_list.js?v=20261127-21"></script>
 </body>
 </html>
+

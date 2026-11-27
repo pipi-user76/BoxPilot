@@ -127,6 +127,12 @@ class NewUserRequest(RegisterRequest):
     is_admin: bool = False
 
 
+class PasswordResetRequest(BaseModel):
+    """管理员重置密码：只接收新密码，不校验旧密码。"""
+
+    password: str = Field(min_length=8, max_length=256)
+
+
 class AuthResponse(BaseModel):
     user: UserRecord
     expires_at: datetime

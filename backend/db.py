@@ -39,7 +39,7 @@ class TaskStore(Protocol):
         owner_id: str | None = None,
     ) -> tuple[list[TaskRecord], int]: ...
 
-    def count_tasks(self, owner_id: str | None = None) -> dict[str, int]: ...
+    def count_tasks(self, owner_id: str | None = None, task_type: str | None = None) -> dict[str, int]: ...
 
     def delete_task(self, task_id: str) -> bool: ...
 
@@ -161,10 +161,15 @@ class InMemoryTaskStore:
             visible = matched[start : start + page_size]
             return [task.model_copy(deep=True) for task in visible], len(matched)
 
-    def count_tasks(self, owner_id: str | None = None) -> dict[str, int]:
+    def count_tasks(self, owner_id: str | None = None, task_type: str | None = None) -> dict[str, int]:
         """统计任务状态分布，供列表页概览使用；普通用户只统计自己的任务。"""
         with self._lock:
-            tasks = [task for task in self._tasks.values() if owner_id is None or task.owner_id == owner_id]
+            tasks = [
+                task
+                for task in self._tasks.values()
+                if (owner_id is None or task.owner_id == owner_id)
+                and (task_type is None or task.task_type.value == task_type)
+            ]
             counts = {status.value: 0 for status in TaskStatus}
             counts["total"] = len(tasks)
             for task in tasks:

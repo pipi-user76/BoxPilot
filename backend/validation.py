@@ -22,6 +22,9 @@ _BLOCKED_HOSTNAMES = {
 }
 _BLOCKED_SUFFIXES = (".docker.internal", ".internal", ".local")
 _ALLOWED_PORTS = {80, 443}
+# 本机代理（Clash 等）常用 198.18.0.0/15 做 fake-IP：域名解析到这里，
+# 但实际流量由代理隧道转发到公网。它不属于真实内网段，可在配置里选择信任。
+_PROXY_FAKE_NET = ipaddress.ip_network("198.18.0.0/15")
 
 
 class ValidationFailure(ValueError):
@@ -102,6 +105,14 @@ def _is_blocked_address(address: str) -> bool:
     )
 
 
+def _is_proxy_fake_address(address: str) -> bool:
+    """198.18.0.0/15 多为本机代理的 fake-IP，不能据此断定存在内网服务。"""
+    try:
+        return ipaddress.ip_address(address) in _PROXY_FAKE_NET
+    except ValueError:
+        return False
+
+
 def resolve_public_addresses(host: str, port: int) -> list[str]:
     """解析域名并返回全部地址；任一地址落在内网即整体拒绝。"""
     try:
@@ -113,7 +124,12 @@ def resolve_public_addresses(host: str, port: int) -> list[str]:
         raise ValidationFailure("域名无法解析")
     blocked = [address for address in addresses if _is_blocked_address(address)]
     if blocked:
-        raise ValidationFailure("域名指向内网地址")
+        if settings.TRUST_PROXY_DNS and all(_is_proxy_fake_address(item) for item in blocked):
+            return addresses
+        hint = "；如果是本机代理的 fake-IP，可设置 TRUST_PROXY_DNS=true" if all(
+            _is_proxy_fake_address(item) for item in blocked
+        ) else ""
+        raise ValidationFailure(f"域名指向内网地址（{blocked[0]}）{hint}")
     return addresses
 
 

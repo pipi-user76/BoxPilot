@@ -27,6 +27,10 @@ class AuthStore(Protocol):
 
     def list_users(self) -> list[UserRecord]: ...
 
+    def delete_user(self, user_id: str) -> bool: ...
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> bool: ...
+
 
 class InMemoryAuthStore:
     name = "memory"
@@ -66,6 +70,19 @@ class InMemoryAuthStore:
     def list_users(self) -> list[UserRecord]:
         users = [user.model_copy(deep=True) for user in self._users.values()]
         return sorted(users, key=lambda item: item.created_at)
+
+    def delete_user(self, user_id: str) -> bool:
+        if user_id not in self._users:
+            return False
+        self._users.pop(user_id, None)
+        self._hashes.pop(user_id, None)
+        return True
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> bool:
+        if user_id not in self._users:
+            return False
+        self._hashes[user_id] = password_hash
+        return True
 
 
 class SQLiteAuthStore:
@@ -130,3 +147,13 @@ class SQLiteAuthStore:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM users ORDER BY created_at").fetchall()
         return [self._model(row) for row in rows]
+
+    def delete_user(self, user_id: str) -> bool:
+        with self._connect() as db:
+            cursor = db.execute("DELETE FROM users WHERE id=?", (user_id,))
+        return cursor.rowcount > 0
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> bool:
+        with self._connect() as db:
+            cursor = db.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash, user_id))
+        return cursor.rowcount > 0

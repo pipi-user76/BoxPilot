@@ -1,77 +1,198 @@
-<!-- 文件职责：管理员账号管理页；列出账号并由管理员创建新用户。 -->
+<!-- 文件职责：账号管理。与其他功能页共用同一套外壳，只把列表换成账号。 -->
 <!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>账号管理 · BoxPilot</title>
-  <link rel="stylesheet" href="styles.css?v=20261126">
-  <link rel="stylesheet" href="users.css?v=20261127">
+  <link rel="stylesheet" href="styles.css?v=20261127-20">
+  <link rel="stylesheet" href="users.css?v=20261127-5">
 </head>
 <body>
-  <header class="app-header">
-    <div class="header-inner">
-      <div>
-        <p class="product-mark">BOXPILOT</p>
-        <h1>账号管理</h1>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div>
+          <strong>BOXPILOT</strong>
+          <small>任务执行工作台</small>
+        </div>
       </div>
-      <div class="header-actions">
-        <span id="current-user" class="user-chip" hidden></span>
-        <a class="button ghost" href="task_list.html">返回工作台</a>
-        <button id="logout" class="button ghost" type="button" hidden>退出</button>
+
+      <nav class="side-nav" aria-label="功能导航">
+        <p class="side-title">工作空间</p>
+        <a class="side-link with-icon" href="task_list.html">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          <span>全部任务</span>
+        </a>
+
+        <p class="side-title">功能</p>
+        <a class="side-link with-icon" href="task_list.html?type=WEB_DIGEST">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.2 3.6 8.5S14.4 18.2 12 20.5C9.6 18.2 8.4 15.3 8.4 12S9.6 5.8 12 3.5Z"/></svg>
+          <span>网页资料整理</span>
+        </a>
+        <a class="side-link with-icon" href="task_list.html?type=CSV_ANALYSIS">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M9 9.5v10M15 9.5v10"/></svg>
+          <span>CSV 数据分析</span>
+        </a>
+        <a class="side-link with-icon" href="task_list.html?type=REPO_CHECK">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
+          <span>代码仓库体检</span>
+        </a>
+        <a class="side-link with-icon" href="task_list.html?type=WEB_ACCEPTANCE">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12 2.4 2.4 4.6-5"/></svg>
+          <span>网页应用验收</span>
+        </a>
+
+        <p class="side-title">账号</p>
+        <a class="side-link with-icon is-active" href="users.html">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19a6 6 0 0 1 12 0M16 5.5a3 3 0 0 1 0 5.6M18.5 19a5.5 5.5 0 0 0-3-4.9"/></svg>
+          <span>账号管理</span>
+        </a>
+      </nav>
+
+      <div class="side-foot">
+        <div class="user-card" id="user-card" hidden>
+          <span id="user-avatar" class="avatar">B</span>
+          <div class="user-card-text">
+            <strong id="current-user">账号</strong>
+            <small id="current-role">成员</small>
+          </div>
+          <button id="logout-rail" class="user-logout" type="button" title="退出登录" aria-label="退出登录">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12H4m4-4-4 4 4 4M14 4h5v16h-5"/></svg>
+          </button>
+        </div>
       </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="crumbs">
+          <span>工作台</span>
+          <span class="crumb-sep">/</span>
+          <strong>账号管理</strong>
+        </div>
+        <div class="topbar-actions">
+          <span class="health-badge" data-state="ok">管理员视图</span>
+          <span id="today" class="today"></span>
+        </div>
+      </header>
+
+      <main class="content">
+        <div class="page-head">
+          <div>
+            <h1>账号管理</h1>
+            <p id="user-count">0 个账号</p>
+          </div>
+          <div class="page-actions">
+            <button id="refresh" class="button secondary" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+              刷新
+            </button>
+            <button id="create-open" class="button primary" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              创建账号
+            </button>
+          </div>
+        </div>
+
+        <section class="panel users-panel">
+          <div class="user-head">
+            <span>账号</span>
+            <span>角色</span>
+            <span>创建时间</span>
+            <span>操作</span>
+          </div>
+          <div id="user-rows" class="user-rows"></div>
+          <p id="list-error" class="create-error" role="alert"></p>
+        </section>
+      </main>
     </div>
-  </header>
+  </div>
 
-  <main class="workspace">
-    <div class="users-layout">
-      <section class="user-panel">
-        <div class="section-header">
-          <h2>账号列表</h2>
-          <span id="user-count" class="muted-text">0 个账号</span>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>用户名</th>
-                <th>角色</th>
-                <th>创建时间</th>
-                <th>最近登录</th>
-              </tr>
-            </thead>
-            <tbody id="user-rows"></tbody>
-          </table>
-        </div>
-        <p id="list-error" class="form-error" role="alert"></p>
-      </section>
-
-      <section class="user-panel">
-        <div class="section-header">
+  <dialog id="create-dialog" class="create-dialog">
+    <form id="create-user-form" method="dialog">
+      <div class="preview-header">
+        <div>
+          <p class="eyebrow">新建账号</p>
           <h2>创建账号</h2>
         </div>
-        <form id="create-user-form" class="user-form">
-          <label>用户名
-            <input id="new-username" name="username" autocomplete="off" minlength="3" maxlength="32" required>
-          </label>
-          <p class="field-hint">字母、数字、下划线、点或短横线，3 到 32 位。</p>
-          <label>初始密码
-            <input id="new-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
-          </label>
-          <p class="field-hint">至少 8 位，创建后请让使用者自行修改。</p>
-          <label>角色
-            <select id="new-role">
-              <option value="user">普通用户</option>
-              <option value="admin">管理员</option>
-            </select>
-          </label>
-          <button id="create-user" class="button" type="submit">创建账号</button>
-          <p id="form-error" class="form-error" role="alert"></p>
-        </form>
-      </section>
-    </div>
-  </main>
+        <button id="create-close" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="create-fields">
+        <label class="field">
+          <span class="field-label">用户名</span>
+          <input id="new-username" name="username" autocomplete="off" minlength="3" maxlength="32" required>
+          <span class="field-hint">字母、数字、下划线、点或短横线，3 到 32 位。</span>
+        </label>
+        <label class="field">
+          <span class="field-label">初始密码</span>
+          <input id="new-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+          <span class="field-hint">至少 8 位，创建后可以让使用者自行修改。</span>
+        </label>
+        <label class="field">
+          <span class="field-label">角色</span>
+          <select id="new-role">
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+        </label>
+      </div>
+      <p id="form-error" class="create-error" role="alert"></p>
+      <div class="create-footer">
+        <button id="create-cancel" class="button secondary" type="button">取消</button>
+        <button id="create-user" class="button primary" type="submit">创建账号</button>
+      </div>
+    </form>
+  </dialog>
 
-  <script src="users.js?v=20261127"></script>
+  <dialog id="reset-dialog" class="create-dialog">
+    <div class="preview-header">
+      <div>
+        <p class="eyebrow">重置密码</p>
+        <h2 id="reset-title">重置密码</h2>
+      </div>
+      <button id="reset-close" class="icon-button" type="button" aria-label="关闭">×</button>
+    </div>
+    <p class="delete-note">确认后，该账号的密码会重置为 <strong>12345678</strong>，旧密码立即失效。</p>
+    <p id="reset-error" class="create-error" role="alert"></p>
+    <div class="create-footer">
+      <button id="reset-cancel" class="button secondary" type="button">取消</button>
+      <button id="reset-confirm" class="button primary" type="button">确认重置</button>
+    </div>
+  </dialog>
+
+  <dialog id="reset-done-dialog" class="create-dialog">
+    <div class="preview-header">
+      <div>
+        <p class="eyebrow">重置完成</p>
+        <h2>密码已重置</h2>
+      </div>
+      <button id="reset-done-close" class="icon-button" type="button" aria-label="关闭">×</button>
+    </div>
+    <p class="delete-note">密码重置为：<strong>12345678</strong></p>
+    <div class="create-footer">
+      <button id="reset-done-ok" class="button primary" type="button">知道了</button>
+    </div>
+  </dialog>
+
+  <dialog id="delete-dialog" class="create-dialog">
+    <div class="preview-header">
+      <div>
+        <p class="eyebrow">删除账号</p>
+        <h2 id="delete-title">删除账号</h2>
+      </div>
+      <button id="delete-close" class="icon-button" type="button" aria-label="关闭">×</button>
+    </div>
+    <p class="delete-note">删除后该账号无法再登录，已创建的任务仍保留在工作台。</p>
+    <p id="delete-error" class="create-error" role="alert"></p>
+    <div class="create-footer">
+      <button id="delete-cancel" class="button secondary" type="button">取消</button>
+      <button id="delete-confirm" class="button danger" type="button">确认删除</button>
+    </div>
+  </dialog>
+
+  <script src="users.js?v=20261127-5"></script>
 </body>
 </html>
+

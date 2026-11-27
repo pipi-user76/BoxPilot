@@ -151,6 +151,45 @@ class AuthTests(unittest.TestCase):
         duplicate = self.client.post("/auth/users", json={"username": "ALICE", "password": "secret123"})
         self.assertEqual(duplicate.status_code, 409)
 
+    def test_admin_resets_and_deletes_accounts(self) -> None:
+        self.client.post("/auth/register", json={"username": "alice", "password": "secret123"})
+        self.login("alice", "secret123")
+        bob = self.client.post("/auth/users", json={"username": "bob", "password": "secret123"}).json()
+
+        # 重置密码后旧密码立即失效，新密码可以登录。
+        reset = self.client.post(f"/auth/users/{bob['id']}/password", json={"password": "newpass123"})
+        self.assertEqual(reset.status_code, 204)
+        self.logout()
+        self.assertEqual(
+            self.client.post("/auth/login", json={"username": "bob", "password": "secret123"}).status_code,
+            401,
+        )
+        self.login("bob", "newpass123")
+
+        # 普通用户不能重置或删除别人。
+        self.assertEqual(
+            self.client.post(f"/auth/users/{bob['id']}/password", json={"password": "another123"}).status_code,
+            403,
+        )
+        self.assertEqual(self.client.delete(f"/auth/users/{bob['id']}").status_code, 403)
+
+        self.logout()
+        self.login("alice", "secret123")
+        # 不能删除自己。
+        me = self.client.get("/auth/me").json()
+        self.assertEqual(self.client.delete(f"/auth/users/{me['id']}").status_code, 409)
+
+        deleted = self.client.delete(f"/auth/users/{bob['id']}")
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(
+            [user["username"] for user in self.client.get("/auth/users").json()], ["alice"]
+        )
+        self.logout()
+        self.assertEqual(
+            self.client.post("/auth/login", json={"username": "bob", "password": "newpass123"}).status_code,
+            401,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

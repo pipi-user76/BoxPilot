@@ -258,7 +258,7 @@ def list_tasks(
         page=page,
         page_size=page_size,
         pages=max(1, math.ceil(total / page_size)),
-        counts=store.count_tasks(owner_id),
+        counts=store.count_tasks(owner_id, task_type.value if task_type else None),
     )
 
 

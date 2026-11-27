@@ -175,9 +175,16 @@ class SQLiteTaskStore:
             )
             return self._task_models(db, rows), total
 
-    def count_tasks(self, owner_id=None):
+    def count_tasks(self, owner_id=None, task_type=None):
         counts = {status.value: 0 for status in TaskStatus}
-        where, params = (' WHERE owner_id=?', (owner_id,)) if owner_id is not None else ('', ())
+        clauses, params = [], []
+        if owner_id is not None:
+            clauses.append('owner_id=?')
+            params.append(owner_id)
+        if task_type is not None:
+            clauses.append('task_type=?')
+            params.append(task_type)
+        where = ' WHERE ' + ' AND '.join(clauses) if clauses else ''
         with self._connection() as db:
             counts.update(dict(db.execute('SELECT status,count(*) FROM tasks' + where + ' GROUP BY status', params)))
         return {'total': sum(counts.values()), **counts}

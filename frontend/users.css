@@ -1,129 +1,132 @@
-/* 文件职责：账号管理页样式；沿用工作台的浅色令牌，只补表格与表单布局。 */
+/* 文件职责：账号管理页的列表样式；外壳与弹窗沿用 styles.css。 */
 
-.users-layout {
+.users-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.user-head,
+.user-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
-  gap: 18px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) 96px 150px 168px;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 16px;
 }
 
-.user-panel {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 18px 20px 20px;
-}
-
-.user-panel .section-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.user-panel h2 {
-  margin: 0;
-  font-size: 16px;
-}
-
-.muted-text {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.table-wrap {
-  overflow-x: auto;
-}
-
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.data-table th,
-.data-table td {
-  text-align: left;
-  padding: 10px 8px;
+.user-head {
+  background: var(--surface-soft);
   border-bottom: 1px solid var(--line);
-  white-space: nowrap;
-}
-
-.data-table th {
-  font-weight: 600;
-  color: var(--muted);
+  color: #98a2b3;
   font-size: 12px;
+  letter-spacing: 0.02em;
 }
 
-.data-table tbody tr:last-child td {
-  border-bottom: 0;
+.user-head span:last-child { text-align: right; }
+
+.user-row {
+  border-bottom: 1px solid #eef1f5;
 }
 
-.data-table tbody tr:hover {
-  background: #f7f9fa;
+.user-row:last-child { border-bottom: 0; }
+
+.user-row:hover { background: #f9fbfe; }
+
+.user-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
-.role-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  border: 1px solid var(--line);
-  color: var(--muted);
+.user-cell-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
-.role-badge[data-role="admin"] {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 35%, white);
-  background: color-mix(in srgb, var(--accent) 8%, white);
-}
-
-.user-form label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.user-form input,
-.user-form select {
-  width: 100%;
-  margin-top: 6px;
-  padding: 9px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #fff;
+.user-cell-text strong {
+  font-size: 14px;
+  font-weight: 600;
   color: var(--ink);
 }
 
-.user-form input:focus-visible,
-.user-form select:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
-}
-
-.field-hint {
-  margin: 0 0 14px;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.user-form .button {
-  width: 100%;
-  margin-top: 6px;
-}
-
-.form-error {
-  min-height: 18px;
-  margin: 10px 0 0;
+.user-cell-text small {
   font-size: 12px;
-  color: var(--danger);
+  color: #8b95a5;
 }
 
-@media (max-width: 980px) {
-  .users-layout {
-    grid-template-columns: 1fr;
+.user-created {
+  font-size: 12.5px;
+  color: #6b7688;
+  font-variant-numeric: tabular-nums;
+}
+
+.user-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  width: fit-content;
+  white-space: nowrap;
+  background: #eef2f7;
+  color: #4b5768;
+}
+
+.role-badge[data-role="admin"] {
+  background: #eaf1ff;
+  color: #1d4ed8;
+}
+
+.delete-note {
+  margin: 0;
+  padding: 0 22px;
+  color: #5b6678;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+#delete-dialog .create-head,
+#delete-dialog .create-footer {
+  padding-left: 22px;
+  padding-right: 22px;
+}
+
+#delete-dialog .create-error {
+  margin: 10px 22px 0;
+}
+
+@media (max-width: 900px) {
+  .user-head,
+  .user-row {
+    grid-template-columns: minmax(0, 1fr) 84px 150px;
+  }
+
+  .user-head span:nth-child(3),
+  .user-created {
+    display: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .user-head { display: none; }
+
+  .user-row {
+    grid-template-columns: minmax(0, 1fr) 84px;
+    gap: 8px;
+  }
+
+  .user-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
 }

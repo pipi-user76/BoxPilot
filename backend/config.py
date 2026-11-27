@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 20
     URL_MAX_LENGTH: int = 2048
     COMMAND_MAX_LENGTH: int = 8192
+    # 本机代理把域名解析到 198.18.0.0/15 时是否放行；云服务器建议设为 false。
+    TRUST_PROXY_DNS: bool = True
     # 登录会话：生产环境必须显式设置 SESSION_SECRET，否则每次重启都会让所有会话失效。
     SESSION_SECRET: str = ""
     SESSION_MAX_AGE_SECONDS: int = 7 * 24 * 3600

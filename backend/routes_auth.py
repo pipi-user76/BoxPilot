@@ -18,6 +18,7 @@ from backend.models import (
     AuthResponse,
     LoginRequest,
     NewUserRequest,
+    PasswordResetRequest,
     RegisterRequest,
     UserRecord,
     utc_now,
@@ -146,3 +147,54 @@ def create_user(payload: NewUserRequest, request: Request) -> UserRecord:
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "USERNAME_TAKEN", "message": "用户名已存在"},
         ) from exc
+
+
+def _require_admin(request: Request, action: str) -> UserRecord:
+    current = getattr(request.state, "user", None)
+    if current is None or not current.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": f"只有管理员可以{action}"},
+        )
+    return current
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: str, request: Request) -> Response:
+    """删除账号；不允许删自己，也不允许删掉最后一个管理员。"""
+    current = _require_admin(request, "删除账号")
+    store = _store(request)
+    target = store.get_user(user_id)
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "USER_NOT_FOUND", "message": "账号不存在"},
+        )
+    if target.id == current.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "CANNOT_DELETE_SELF", "message": "不能删除当前登录的账号"},
+        )
+    if target.is_admin:
+        admins = [user for user in store.list_users() if user.is_admin]
+        if len(admins) <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "LAST_ADMIN", "message": "至少需要保留一个管理员"},
+            )
+    store.delete_user(user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/users/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
+def reset_password(user_id: str, payload: PasswordResetRequest, request: Request) -> Response:
+    """管理员重置指定账号的密码；旧密码立即失效。"""
+    _require_admin(request, "重置密码")
+    store = _store(request)
+    if store.get_user(user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "USER_NOT_FOUND", "message": "账号不存在"},
+        )
+    store.set_password_hash(user_id, hash_password(payload.password))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

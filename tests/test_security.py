@@ -91,6 +91,19 @@ class UrlGuardTests(unittest.TestCase):
         with self.assertRaises(ValidationFailure):
             validate_public_url("https://example.com/")
 
+    @patch("backend.validation.socket.getaddrinfo")
+    def test_proxy_fake_ip_respects_setting(self, dns) -> None:
+        dns.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("198.18.0.28", 443))]
+        original = settings.TRUST_PROXY_DNS
+        try:
+            settings.TRUST_PROXY_DNS = False
+            with self.assertRaises(ValidationFailure):
+                validate_public_url("https://example.com/")
+            settings.TRUST_PROXY_DNS = True
+            self.assertEqual(validate_public_url("https://example.com/"), "https://example.com/")
+        finally:
+            settings.TRUST_PROXY_DNS = original
+
 
 class SandboxTimeoutTests(unittest.TestCase):
     def test_exit_code_137_maps_to_step_killed(self) -> None:
