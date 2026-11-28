@@ -28,37 +28,41 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 
 ## 当前进度
 
-更新时间：2026-11-27。工作台按功能拆成独立页面：侧栏进入“网页资料整理 / CSV 数据分析 / 代码仓库体检 / 网页应用验收”，每个页面只列本类任务，“创建任务”用悬浮框按类型收集参数，提交后直接回到对应列表。集成版默认接入 SQLite 三表与用户表，四个模板沿用统一 API、调度器和沙箱适配器；工作台支持批量订阅、全选下载与规范命名；任务按用户隔离，服务器部署脚本与 systemd/Caddy 模板已补齐。
+更新时间：2026-11-28。工作台按功能拆成独立页面：侧栏进入“网页资料整理 / CSV 数据分析 / 代码仓库体检 / 网页应用验收 / 知识库 / 定时任务 / 账号管理”，每个页面只列本类任务；“创建任务”用两列分组悬浮框按类型收集参数，CSV 支持 1–5 个文件上传，提交后直接回到对应列表。SQLite 已迁移到 schema v10（任务、步骤、产物、用户、定时任务/通知、知识库/文档/会话/切片、标签/批注），网页整理、网页对比、CSV、仓库体检、网页验收五个模板沿用统一 API、调度器和沙箱适配器；任务按用户隔离，服务器采用 systemd + nginx，环境变量放 `/etc/boxpilot.env`。
 
 | 模块 | 状态 | 当前实现 |
 |---|---|---|
 | FastAPI 与任务 API | 已完成 | 创建、搜索分页列表、详情、取消、重试、批量删除、清理、产物预览与下载 |
-| AIO Sandbox 适配 | 已完成 | Shell、文件、浏览器、Readability 正文提取、整页截图、上传和下载 |
+| AIO Sandbox 适配 | 已完成 | Shell、文件、浏览器、trafilatura/Readability 正文提取、整页截图、上传和下载 |
 | 任务调度 | 已完成 | 固定步骤、状态流转、失败停止、串行执行锁、步骤边界取消、失败重试、步骤与任务超时兜底 |
 | 结构化日志 | 已完成 | JSON Lines 输出到 stdout 与 `logs/boxpilot.jsonl`（5 MB × 3 轮转） |
 | 网页资料整理 `WEB_DIGEST` | 已完成 | `article.md` 去噪正文、整页 `screenshot.png`、`web-digest.json`（词数、阅读时长、标题数、链接数、图片数） |
-| CSV 分析 `CSV_ANALYSIS` | 已完成 | multipart 上传、标准库分析、`summary.json`（列类型、缺失、唯一值、高频值）、中文 `report.md` |
+| 网页对比 `WEB_COMPARE` | 已完成 | 2–10 个 URL 的对比报告 `compare.md` / `compare.json`，每个来源的 `source-N.md`、`source-N.png`、`source-N.items.json`；详情为“来源/结论 + 产物下拉 + 固定底部对话” |
+| CSV 分析 `CSV_ANALYSIS` | 已完成 | 支持 1–5 个 CSV 上传、表画像/列角色、ECharts SVG 图表、固定 5 色配色、图表点击放大与 SVG/PNG 下载、LLM 可选解读、中文 `report.md`；多文件按数据集分 tab，每个数据集生成全部可用图表 |
 | 仓库体检 `REPO_CHECK` | 已完成 | 白名单仓库、固定测试命令、离线 `demo://python`、失败重试、中文错误说明与失败报告；默认用 uv 在任务目录建独立虚拟环境，按 `requires-python` 选或现场补装 3.13/3.12/3.11/3.10，装完依赖再补 pytest 并尽量把项目装成可编辑包 |
 | 网页验收 `WEB_ACCEPTANCE` | 已完成 | 标题比对、整页截图、`acceptance.json`（预期/实际标题、状态码、加载耗时、截图大小、检查时间） |
-| Web 工作台 | 已完成进阶版 | 四个功能各自成页，创建任务使用悬浮框；侧栏 + 列表 + 详情三段式布局；状态页签、服务端搜索分页、批量订阅、全选与批量下载、一键下载全部、取消/重试、任务结论、文本与图片预览 |
+| Web 工作台 | 已完成进阶版 | 功能各自成页，创建任务使用两列分组悬浮框（编号分组 + 标签/字段）；点击任务后进入产物优先布局：收起侧栏文字、任务列表自适应左缩、产物区约占半屏；对比详情的来源/结论与对话分区，输入框固定底部，任务产物改为下拉浮层；六个页面首屏内联底色，避免样式表加载前白屏；状态页签、服务端搜索分页、批量订阅、全选与批量下载、一键下载全部、取消/重试、任务结论、文本与图片预览 |
 | 下载命名 | 已完成 | 任务与压缩包统一为 `类型_目标_时间_短ID`，批量包按任务名分目录 |
-| SQLite 持久化 | 已接入 | 应用默认使用 SQLite 存储任务、步骤和产物索引 |
+| SQLite 持久化 | 已完成 | schema v10：任务/步骤/产物、用户、定时任务/通知、知识库/文档/消息/切片、标签/批注；WAL 模式；`DATABASE_PATH` 应指向持久化目录 |
 | 账号与数据隔离 | 已完成 | 用户名/密码登录、scrypt 哈希、签名 Cookie，任务按 `owner_id` 隔离，管理员可查看全部 |
-| 服务器部署 | 已完成 | `deploy/bootstrap.sh` 一键安装，systemd 单进程托管，Caddy 反代与 HTTPS 模板 |
-| 10 至 15 个系统样例 | 进行中 | 已有 117 项自动化测试，尚需形成统一验收表和统计报告 |
+| 知识库与 RAG | 已完成 | 独立三栏页面；文档按会话入库 `session.md`；Chroma 向量 + SQLite FTS5，RRF 融合、查询改写、SSE 流式问答、引用折叠、会话重命名/删除 |
+| 定时任务与通知 | 已完成 | APScheduler + `schedules`/`notifications` 表；cron 五段规则、立即执行、历史记录、站内通知与未读数 |
+| 标签、快照与导出 | 已完成 | 任务标签、知识库文档标签、批注；`GET /tasks/{id}/snapshots`；CSV/Markdown/GB7714 导出 |
+| 服务器部署 | 已完成 | `deploy/bootstrap.sh` 安装依赖，systemd 单进程托管，nginx 反向代理；环境变量放 `/etc/boxpilot.env`，数据库固定到 `/var/lib/boxpilot/data/boxpilot.db` |
+| 10 至 15 个系统样例 | 进行中 | 已有 153 项自动化测试，尚需形成统一验收表和统计报告 |
 
-当前已注册 `MOCK`、`CSV_ANALYSIS`、`WEB_DIGEST`、`REPO_CHECK` 和 `WEB_ACCEPTANCE`。未知任务类型会返回明确校验错误，不会生成伪成功任务。
+当前已注册 `MOCK`、`CSV_ANALYSIS`、`WEB_DIGEST`、`WEB_COMPARE`、`REPO_CHECK` 和 `WEB_ACCEPTANCE`。未知任务类型会返回明确校验错误，不会生成伪成功任务。
 
 最近验证结果：
 
-- 117 项 Python 测试中，1 项真实沙箱集成测试默认跳过。
+- 153 项 Python 测试中，1 项真实沙箱集成测试默认跳过。
 - 登录链路已实测：未登录访问工作台 303 跳转登录页；管理员 alice 可见全部 8 条任务，新账号 bob 登录后列表为 0，直接访问 alice 的任务详情与打包接口均返回 404。
-- 真实 `WEB_DIGEST` 使用沙箱 Readability 去噪并识别列表条目，`books.toscrape.com` 抽出 20 条、268 词，产出 5 个文件（正文、条目 JSON、条目 CSV、整页截图、报告）。
+- 真实 `WEB_DIGEST` 优先用 trafilatura 解析原始 DOM，失败时回退到沙箱 Readability/可见文本；列表页仍识别条目，`books.toscrape.com` 抽出 20 条、268 词，产出 5 个文件（正文、条目 JSON、条目 CSV、整页截图、报告）。
 - 批量订阅一次提交多个地址，共享同一批次号；批次可在列表里筛选，详情里可一键重跑。
 - 任务与压缩包按 `类型_目标_时间_短ID` 命名，单个压缩包内的文件也带同一前缀，下载后不会互相覆盖。
 - 真实仓库体检默认建 `.venv` 并现场补装 Python 3.13.6，装完依赖后跑通本项目 44 项测试（1 项跳过）。
-- 真实 CSV 分析生成 `summary.json` 与中文 `report.md`，样例完整度 91.7%。
-- 真实取消任务在步骤边界落为 `CANCELLED`，失败任务重试生成 `attempt=2` 且 `retry_of` 指向原任务。
+- 真实 CSV 分析会自动识别表型（数值时序、二维交叉、对比清单、纯文本等）、列角色与推荐视图，生成 `summary.json` + 中文 `report.md`，前端用 ECharts 5.5（SVG renderer）渲染折线/柱状/饼图/热力/散点/思维导图，并附可选的中文解读与表内问答；支持 1–5 个 CSV，多文件按数据集切换，使用固定 5 色配色。
+- 真实取消任务在步骤边界落为 `CANCELLED`；失败任务重试沿用同一条任务记录，`attempt` 递增、不新增任务条，旧步骤与产物先清空再重跑；失败结论统一带 `reason` 与 `code`。沙箱不可用、页面打不开、超时这类基础设施失败会自动补跑一次（`AUTO_RETRY_ATTEMPTS`，默认 1，参数错误与登录问题不重试）。
 - 列表分页、搜索、批量清理、文本预览和图片预览均已通过浏览器联调。
 - 健康检查反映运行时状态；服务与 AIO Sandbox 启动后检查 `/health`。
 
@@ -67,7 +71,8 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 | 模板 | 产物 | 说明 |
 |---|---|---|
 | `WEB_DIGEST` | `article.md`、`items.json`、`items.csv`、`screenshot.png`、`web-digest.json` | 列表页抽条目成表，文章页只留正文、截图和报告；报告含词数、阅读时长、条目数与爬虫元数据 |
-| `CSV_ANALYSIS` | `summary.json`、`report.md` | JSON 含行列数、重复行、缺失单元格、完整度、每列类型/唯一值/示例/高频值；Markdown 为中文列概览表 |
+| `WEB_COMPARE` | `compare.md`、`compare.json`、各来源 `source-N.md` / `source-N.png` / `source-N.items.json` | 多页对比报告；详情含来源、结论和逐来源摘要，任务产物以浮层展示，对话固定在底部 |
+| `CSV_ANALYSIS` | `summary.json`、`report.md` | JSON 含行列数、完整度、表画像、列角色、7 种视图的可用性与图表数据、可选 `insight`；多文件含 `datasets[]` 与 `multi_dataset` 表型，每个数据集保留全部可用图表；Markdown 含表型、推荐视图、分析结论与列概览 |
 | `REPO_CHECK` | `check-report.md`、`check-report.json`、`test.log` | 成功时的最小集合；克隆重试过才有 `clone.log`，安装失败才有 `install.log`；`install-result.json` 只留在沙箱 |
 | `WEB_ACCEPTANCE` | `acceptance.json`、`page.png` | JSON 含预期/实际标题、是否通过、状态码、加载耗时、截图大小、检查时间 |
 
@@ -79,8 +84,8 @@ BoxPilot 是基于 AIO Sandbox 的轻量任务执行工作台。后端接收任�
 
 | 优先级 | 时间 | 工作内容 | 完成标准 |
 |---|---|---|---|
-| 已完成 | SQLite 三表 | 默认持久化 `TaskStore` 已接入 | 重启后任务、步骤和产物仍可查询 |
-| 已完成 | 2026-11-16 | 四模板持久化真实沙箱回归 | 四类任务成功，重启后详情与产物内容一致 |
+| 已完成 | SQLite schema v10 | 默认持久化 `TaskStore` 已接入 | 重启后任务、步骤、产物、知识库与调度记录仍可查询 |
+| 已完成 | 2026-11-16 | 五模板持久化真实沙箱回归 | 网页整理、网页对比、CSV、仓库体检与验收任务成功，重启后详情与产物内容一致 |
 | P1 | 11/13-11/17 | 建立 10 至 15 个统一测试用例和结果登记表 | 记录预期、实际、耗时、成功率及失败原因 |
 | P1 | 11/13-11/17 | 日志落盘检索与演示脚本 | 用 JSON 日志还原一次失败任务的完整经过 |
 | 已完成 | 2026-11-26 | 登录、数据隔离与服务器部署 | 未登录跳转登录页；任务按 `owner_id` 隔离；`deploy/bootstrap.sh` 可在 Ubuntu 上一次性装好 |
@@ -143,7 +148,7 @@ uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-预期结果：`Ran 117 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 116 项测试可在未启动 Docker 时执行。
+预期结果：`Ran 153 tests ... OK (skipped=1)`。真实沙箱集成测试默认跳过，其余 152 项测试可在未启动 Docker 时执行。
 
 运行真实沙箱集成测试：
 
@@ -165,7 +170,7 @@ $env:BOXPILOT_RUN_SANDBOX_TESTS='1'
 | `GET` | `/tasks` | 任务列表，支持 `q`、`status`、`task_type`、`page`、`page_size` |
 | `GET` | `/tasks/{id}` | 任务、步骤和产物详情 |
 | `POST` | `/tasks/{id}/cancel` | 取消等待中或运行中的任务 |
-| `POST` | `/tasks/{id}/retry` | 以新任务重试失败、超时或已取消的任务 |
+| `POST` | `/tasks/{id}/retry` | 在原任务记录上重试失败、超时或已取消的任务，`attempt` 递增 |
 | `POST` | `/tasks/batch-delete` | 批量删除已结束任务 |
 | `POST` | `/tasks/cleanup` | 按状态和天数清理历史任务 |
 | `GET` | `/tasks/{id}/artifacts` | 任务产物清单 |
@@ -185,7 +190,10 @@ $env:BOXPILOT_RUN_SANDBOX_TESTS='1'
 | `POST` | `/notifications/read-all` | 全部标记已读 |
 | `GET` | `/kb` | 当前用户的知识库列表 |
 | `POST` | `/kb` | 新建知识库：`{name, note}` |
-| `GET/POST` | `/kb/{id}/documents` | 文档列表 / 从任务或文本入库 |
+| `PATCH` | `/kb/{id}` | 重命名知识库：`{name}` |
+| `DELETE` | `/kb/{id}` | 删除知识库及其文档、问答历史与向量 |
+| `GET/POST` | `/kb/{id}/documents` | 文档摘要列表（含 `preview`）/ 从任务或文本入库 |
+| `GET` | `/tasks/{task_id}/kb-documents` | 该任务已入库到哪些知识库 |
 | `POST` | `/kb/{id}/documents/batch` | 从多个任务批量入库（最多 20） |
 | `DELETE` | `/kb/{id}/documents/{doc_id}` | 删除文档并清理向量 |
 | `POST` | `/kb/{id}/documents/{doc_id}/refresh` | 重新切片并刷新向量 |
@@ -203,13 +211,22 @@ $env:BOXPILOT_RUN_SANDBOX_TESTS='1'
 
 ## 知识库
 
-网页资料整理页顶部有“任务列表 / 我的知识库”两个 Tab，知识库是这个功能的升级入口：
+侧栏“知识库”是一个独立页面，与网页资料整理同级，检索范围是当前知识库里的全部文档，可跨任务、跨批次：
 
-- 新建知识库（按主题区分），每个账号只能看到自己的知识库，管理员也不跨用户。
-- 在任务列表勾选网页整理任务，点“存入所选任务”；或在任务详情点“存入知识库”。
-- 入库时按 800 字切片，调用嵌入接口后写入 Chroma（默认 `data/chroma`），元数据保留任务、标题和来源链接。
-- 问答用当前知识库检索前 `top_k` 段，拼进提示词交给 LLM，回答下方可展开引用片段和原网页链接；问答历史随知识库保存。
-- 检索条数与相似度阈值可以在问答区用滑块调整；阈值调高只保留更相关的片段。
+- 新建知识库（按主题区分），每个账号只能看到自己的知识库，管理员也不跨用户；任务详情有“添加到知识库”，可选已有库或当场新建，并勾选是否连同对话一起存入。
+- 默认不自动入库：在任务详情点“添加到知识库”，选择已有知识库或当场新建，并决定是否连同对话一起存入。一次任务只落一条会话记录（`session.md`，含结论、报告、对话与产物清单），不会按产物拆成多条；文档列表用勾选框多选、右侧 × 单个删除。删除任务不会删除文档，而是标记“来源任务已删除”。
+- 入库按标题切片（约 600 字、重叠 80），同时写入 Chroma 向量与 SQLite FTS5；提问时向量与关键词各取 20 条做 RRF 融合，必要时自动改写追问。
+- 支持上传 PDF / TXT / Markdown（默认 10 MB 上限），对话可导出 Markdown。顶部是 42px 高的知识库选择器与操作组（新建/重命名/删除/刷新）；宽屏为「会话 / 对话 / 文档」三栏，窄屏文档栏改为覆盖层。输入框左侧的 ＋ 用于上传，文档栏可从对话头部“文档 N”打开。
+- 连续追问：回答以 SSE 流式返回，可随时停止、重生成或复制；来源在回答下方折叠展示，`[n]` 与来源一一对应。消息带角色标签与卡片边框；左侧会话栏可切换、重命名、删除会话；文档栏展示正文摘要、类型标签，支持搜索、筛选与批量删除。
+- 知识库可删除：确认框展示文档数，删除会清理文档、问答历史与向量；删除后任务详情的“已添加到知识库”灰态会自动恢复。
+- 计划与实现细节见 `docs/kb_upgrade_plan.md`。
+
+## 网页精读、对比与字段采集
+
+- **目标精读**：创建网页整理任务时选预设目标（学习笔记、步骤教程、优缺点对比、参数清单、风险局限）或自定义目标，模型按目标产出 `reading.md`，每条结论标注原文段落；正文超过 10000 字会截断并提示。
+- **网页对比**：在“网页资料整理”的创建弹窗顶部切到“多页对比”，一次填 2–10 个链接，按预设或自定义维度生成一份自然语言分析报告（总体判断、关键差异、适用场景、结论），正文用 `[n]` 标注来源，资料没覆盖的地方会直接说明。产物包括 `compare.md`、`compare.json`，以及每个来源的 `source-N.md`（正文）、`source-N.png`（截图）和 `source-N.items.json`。整次对比只创建一个任务，分析由大模型完成：创建阶段未配置模型会返回 `LLM_NOT_CONFIGURED`；如果已经进入分析但模型连续请求失败，会写入降级来源摘要并标记 `degraded=true`，任务仍可成功，但没有结论和语义标题，需要修复 LLM 配置后重试。打开对比任务时右侧面板会加宽，上方是来源与结论，任务产物收进下拉浮层，下方是固定底部的对话区，开场消息会列出每个来源的标题。
+- **自定义字段**：网页整理任务可声明最多 8 个字段（字段名 + 说明），结果输出 `fields.csv` / `fields.json`，缺失值统一写“无数据”；字段组合可保存为本地模板复用。
+- 问答用当前知识库检索前 6 段，拼进提示词交给 LLM，回答下方可展开引用片段和原网页链接；问答历史随知识库保存。检索条数与阈值固定为默认值，界面不再提供滑块。
 - 除网页任务外，也可以直接上传 PDF、TXT、Markdown 入库；PDF 用 `pypdf` 提取文字，单文件上限 10 MB。
 - 问答区提供“导出对话”，把当前知识库的问答与引用整理成 Markdown 下载。
 - 文档支持删除、批量删除与“刷新向量”（重新切片并重建索引）。
@@ -219,8 +236,8 @@ $env:BOXPILOT_RUN_SANDBOX_TESTS='1'
 四块基础设施已经就位，具体 AI 功能可以在模板里按需调用：
 
 - **LLM 网关**：`backend/llm.py` 提供 `chat`、`chat_json`、`embed`，兼容 OpenAI 协议，带超时、重试、JSON 校验和 token 用量日志。未配置 `LLM_API_KEY` 时 `available()` 为假，调用方应降级。`LLM_TEMPERATURE` 可留空，推理类模型（如 kimi-k3）不接受该参数。
-- **定时任务**：`schedules` 表随 SQLite 迁移到 `user_version=3`；后台线程每 `SCHEDULE_POLL_SECONDS` 秒扫描一次，到期后创建普通任务并推进 `next_run_at`，进程重启不丢。
-- **向量检索**：`backend/rag.py` 把文本分块、调用嵌入接口、向量存 SQLite，检索用余弦相似度，可按 `task_id` 过滤。
+- **定时任务**：`schedules` 与 `notifications` 表随 SQLite 迁移到 schema v10；后台线程每 `SCHEDULE_POLL_SECONDS` 秒扫描一次，到期后创建普通任务并推进 `next_run_at`，进程重启不丢。
+- **向量检索**：`backend/rag.py` 把文本分块、调用嵌入接口，向量写入 Chroma；SQLite FTS5 负责关键词检索，问答时两路结果用 RRF 融合，可按 `task_id` 过滤。
 - **沙箱依赖**：`scripts/sandbox_extras.sh` 在容器内建独立虚拟环境并安装 `pandas`、`matplotlib`、`scikit-learn`，默认不随部署执行。
 
 对应环境变量：`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`、`LLM_EMBEDDING_MODEL`、`LLM_TIMEOUT_SECONDS`、`LLM_MAX_RETRIES`、`SCHEDULE_POLL_SECONDS`、`SCHEDULE_MAX_PER_TICK`。
@@ -249,7 +266,7 @@ $env:BOXPILOT_RUN_SANDBOX_TESTS='1'
 }
 ```
 
-CSV 分析使用 `POST /tasks/csv` 的 multipart 表单上传，字段名为 `file`，只接受不超过 5 MB 的 `.csv` 文件。
+CSV 分析使用 `POST /tasks/csv` 的 multipart 表单上传，字段名为 `files`（可重复，兼容旧字段 `file`），一次 1–5 个 `.csv`，单个不超过 5 MB、总计不超过 20 MB。单个文件生成完整画像与多张图表；多个文件按数据集分别分析，详情里用 tab 切换，每个数据集生成全部可用图表。
 
 仓库体检默认就会准备测试环境：克隆后按仓库的 `requires-python` 挑解释器，用 uv 在任务目录建 `.venv`，安装声明依赖、补 pytest，并尝试以可编辑方式安装项目本身。
 
@@ -299,30 +316,43 @@ Select-String -Path .\logs\boxpilot.jsonl -Pattern '<task_id>'
 ```text
 backend/
   main.py            FastAPI 应用和公共路由装配
+  config.py          .env / 环境变量与持久化路径
   db.py              TaskStore 协议与内存测试实现
-  sqlite_store.py    SQLite 三表及持久化实现
+  sqlite_store.py    SQLite schema v10（任务、用户、KB、标签、调度、通知）
   scheduler.py       状态机、固定步骤调度、取消与重试
+  task_chat.py       任务上下文对话与 CSV/对比问答
+  csv_analyzer.py    CSV 画像、列角色、视图与图表数据
+  llm.py             OpenAI 兼容 LLM/Embedding 网关与 fallback
+  rag.py             切片、Chroma 向量、FTS5 与 RRF 检索
   logging_config.py  JSON Lines 结构化日志
   sandbox_client.py  Shell/File/Browser 统一调用
-  routes_tasks.py    任务查询、取消/重试、清理与预览接口
+  routes_tasks.py    任务查询、取消/重试、清理、快照与导出
   routes_csv.py      CSV multipart 上传接口
+  routes_kb.py       知识库、文档、RAG 问答与 SSE
+  routes_schedules.py 定时任务与通知
+  routes_tags.py     标签、批注与任务导出
   models.py          Pydantic 数据契约
   storage.py         本地任务产物存储
-  templates/         四个任务模板
+  templates/         网页整理/对比、CSV、仓库体检、验收模板
 frontend/
   login.*            登录与首次创建管理员
   users.*            管理员账号管理页
+  kb.*               知识库与 RAG 问答页
+  schedules.*        定时任务页
   create_task.*      旧创建页，已改为跳转到功能页
-  task_list.*        按功能分页的任务列表、创建弹窗与产物预览
+  task_list.*        任务列表、创建弹窗、CSV/对比详情与产物预览
+  vendor/            ECharts 5.5.1 本地资源与许可证
 samples/             测试输入与样例
 artifacts/           程序运行产物，不提交真实数据
 logs/                结构化日志，不提交
 scripts/
-  init_db.py         三表初始化入口（用 python -m scripts.init_db 运行）
+  init_db.py         schema 初始化入口（用 python -m scripts.init_db 运行）
   create_user.py     创建管理员或普通账号
+  reindex_kb.py      重建知识库检索索引
+  sync_document_titles.py 同步文档语义标题
   test_sandbox.py    真实沙箱冒烟测试
 tests/               单元测试、进阶用例与可选沙箱集成测试
-docs/                接口契约与验收记录
+docs/                接口契约、部署与验收记录
 ```
 
 ## 账号与登录
@@ -330,9 +360,9 @@ docs/                接口契约与验收记录
 - 每个任务记录归属用户（`owner_id`）。普通用户只能看到、取消、重试、下载自己的任务；管理员可以查看全部任务。
 - 登录使用 HttpOnly + SameSite=Lax 的签名 Cookie，默认 7 天；密码用标准库 `scrypt` 加盐哈希，数据库里没有明文。
 - 首次部署打开 `/ui/login.html`，点“创建管理员”即可；之后管理员从侧栏“账号管理”进入 `/ui/users.html` 创建普通用户或管理员，也可以运行 `python -m scripts.create_user <用户名> <密码> [--admin]`。
-- 账号管理页与四个功能页共用同一套外壳，管理员可以在行内重置密码或删除账号；不能删除当前登录账号，也不能删掉最后一个管理员。重置密码后旧密码立即失效，删除账号不会连带删除其历史任务。
+- 账号管理页与任务/知识库/定时任务页共用同一套外壳，管理员可以在行内重置密码或删除账号；不能删除当前登录账号，也不能删掉最后一个管理员。重置密码后旧密码立即失效，删除账号不会连带删除其历史任务。
 - 生产环境必须设置 `SESSION_SECRET`，否则每次重启都会让所有会话失效；开启 HTTPS 后再把 `SESSION_COOKIE_SECURE` 设为 `true`。
-- 数据库从 `user_version=1` 自动迁移到 2：新增 `users` 表与 `tasks.owner_id`。旧任务没有归属，只有管理员可见。
+- 数据库 schema 当前为 v10：包含任务/步骤/产物、用户、定时任务/通知、知识库/文档/消息/切片、标签/批注，以及 `tasks.owner_id` 数据隔离。迁移由 `backend/sqlite_store.py` 在启动时按 `PRAGMA user_version` 执行。
 
 ## 安全边界
 
@@ -347,13 +377,18 @@ docs/                接口契约与验收记录
 
 ## 部署
 
-服务器部署步骤、systemd 与 Caddy 模板见 [docs/deployment.md](docs/deployment.md)。一键脚本：
+服务器部署步骤见 [docs/deployment.md](docs/deployment.md)；仓库里的脚本与文档示例可能仍以 Caddy 为例，生产服务器当前使用 nginx，反向代理配置请按实际环境替换。一键脚本：
 
 ```bash
 sudo REPO_URL=git@github.com:you/BoxPilot.git bash deploy/bootstrap.sh
 ```
 
-脚本会把沙箱、后端和 systemd 服务装好，默认只监听本机端口，再由 Caddy 对外提供 HTTPS。
+脚本会把沙箱、后端和 systemd 服务装好，默认只监听 `127.0.0.1:8000`，再由 nginx 对外提供 HTTP/HTTPS。生产环境注意：
+
+- 环境变量放在 `/etc/boxpilot.env`，由 systemd `EnvironmentFile` 读取；源码包不包含 `.env`。
+- 必须显式设置 `DATABASE_PATH=/var/lib/boxpilot/data/boxpilot.db`。不设置时默认相对路径 `data/boxpilot.db` 会落到 `/opt/boxpilot/data/`，升级后看起来像“数据库被重置”。
+- 数据库、产物放在 `/var/lib/boxpilot`，不要随代码目录覆盖；升级前备份该目录。
+- `SESSION_SECRET` 必须固定；HTTPS 下再设置 `SESSION_COOKIE_SECURE=true`。
 
 ## 已知限制
 
@@ -361,3 +396,4 @@ sudo REPO_URL=git@github.com:you/BoxPilot.git bash deploy/bootstrap.sh
 - 运行中任务的取消在步骤边界生效，正在执行的 Shell 或浏览器动作不会被强制终止。
 - 当前公开仓库体检可能受沙箱网络出口影响：克隆会失败重试，装依赖也可能超时；离线演示使用 `demo://python`。
 - 沙箱自带 Python 3.10 与 3.12；3.13 在任务开始时按需补装，镜像不可达时才会降级试跑并在报告里标注。
+- 网页对比的结论和语义标题依赖外部模型。未配置或连续请求失败时会降级为来源摘要（`degraded=true`），不会伪造结论；修复 `/etc/boxpilot.env` 中的模型配置并重启后重试任务即可。

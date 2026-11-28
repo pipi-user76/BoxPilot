@@ -1,10 +1,11 @@
 """SQLite implementation of the shared TaskStore contract."""
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import json
 import sqlite3
+import uuid
 
 from backend.models import (
     Artifact,
@@ -15,6 +16,7 @@ from backend.models import (
     NotificationRecord,
     ScheduleRecord,
     StepStatus,
+    TaskChatMessage,
     TaskRecord,
     TaskStatus,
     TaskStep,
@@ -102,7 +104,90 @@ MIGRATION_V5 = (
     'CREATE INDEX IF NOT EXISTS kb_msg_kb ON kb_messages(kb_id, created_at)',
 )
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 10
+
+MIGRATION_V6 = (
+    "ALTER TABLE kb_messages ADD COLUMN conversation_id TEXT NOT NULL DEFAULT 'default'",
+    "CREATE INDEX IF NOT EXISTS kb_msg_conversation ON kb_messages(kb_id, conversation_id, created_at)",
+)
+
+MIGRATION_V7 = (
+    """CREATE TABLE IF NOT EXISTS task_messages (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS task_msg_task ON task_messages(task_id, created_at)",
+)
+
+MIGRATION_V9 = (
+    """CREATE TABLE IF NOT EXISTS kb_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kb_id TEXT NOT NULL,
+        document_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        heading TEXT NOT NULL DEFAULT '',
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS kb_chunk_doc ON kb_chunks(kb_id, document_id)",
+    """CREATE TABLE IF NOT EXISTS kb_conversations (
+        id TEXT PRIMARY KEY,
+        kb_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS kb_conv_kb ON kb_conversations(kb_id, updated_at)",
+)
+
+MIGRATION_V10 = (
+    """CREATE TABLE IF NOT EXISTS tags (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(owner_id, name)
+    )""",
+    """CREATE TABLE IF NOT EXISTS task_tags (
+        task_id TEXT NOT NULL,
+        tag_id TEXT NOT NULL,
+        PRIMARY KEY(task_id, tag_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS task_tag_tag ON task_tags(tag_id)",
+    """CREATE TABLE IF NOT EXISTS kb_document_tags (
+        document_id TEXT NOT NULL,
+        tag_id TEXT NOT NULL,
+        PRIMARY KEY(document_id, tag_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS kb_doc_tag_tag ON kb_document_tags(tag_id)",
+    """CREATE TABLE IF NOT EXISTS annotations (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        task_id TEXT,
+        document_id TEXT,
+        artifact_name TEXT NOT NULL,
+        block_index INTEGER NOT NULL,
+        start_offset INTEGER NOT NULL,
+        end_offset INTEGER NOT NULL,
+        quote TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS annotation_task ON annotations(task_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS annotation_doc ON annotations(document_id, created_at)",
+)
+
+MIGRATION_V8 = (
+    "ALTER TABLE kb_documents ADD COLUMN artifact_name TEXT",
+    "ALTER TABLE kb_documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'",
+    "ALTER TABLE kb_documents ADD COLUMN orphaned INTEGER NOT NULL DEFAULT 0",
+    "CREATE UNIQUE INDEX IF NOT EXISTS kb_doc_task_artifact "
+    "ON kb_documents(kb_id, task_id, artifact_name) WHERE task_id IS NOT NULL",
+)
 
 
 class SQLiteTaskStore:
@@ -149,6 +234,26 @@ class SQLiteTaskStore:
             if version == 4:
                 for statement in MIGRATION_V5:
                     db.execute(statement)
+                version = 5
+            if version == 5:
+                for statement in MIGRATION_V6:
+                    db.execute(statement)
+                version = 6
+            if version == 6:
+                for statement in MIGRATION_V7:
+                    db.execute(statement)
+                version = 7
+            if version == 7:
+                for statement in MIGRATION_V8:
+                    db.execute(statement)
+                version = 8
+            if version == 8:
+                for statement in MIGRATION_V9:
+                    db.execute(statement)
+                version = 9
+            if version == 9:
+                for statement in MIGRATION_V10:
+                    db.execute(statement)
                 db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
                 return
             if version != 0 or db.execute(
@@ -162,6 +267,16 @@ class SQLiteTaskStore:
             for statement in MIGRATION_V4:
                 db.execute(statement)
             for statement in MIGRATION_V5:
+                db.execute(statement)
+            for statement in MIGRATION_V6:
+                db.execute(statement)
+            for statement in MIGRATION_V7:
+                db.execute(statement)
+            for statement in MIGRATION_V8:
+                db.execute(statement)
+            for statement in MIGRATION_V9:
+                db.execute(statement)
+            for statement in MIGRATION_V10:
                 db.execute(statement)
             db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
 
@@ -223,8 +338,8 @@ class SQLiteTaskStore:
             )
         return task
 
-    def list_tasks(self, *, query='', statuses=None, task_type=None, page=1, page_size=20,
-                   owner_id=None):
+    def list_tasks(self, *, query='', statuses=None, task_type=None, task_types=None, page=1, page_size=20,
+                   owner_id=None, tag=None):
         predicates, params = [], []
         if owner_id is not None:
             predicates.append('owner_id=?')
@@ -235,6 +350,13 @@ class SQLiteTaskStore:
         if task_type is not None:
             predicates.append('task_type=?')
             params.append(task_type)
+        if task_types:
+            predicates.append('task_type IN (' + ','.join('?' for _ in task_types) + ')')
+            params.extend(task_types)
+        if tag:
+            predicates.append("EXISTS (SELECT 1 FROM task_tags tt JOIN tags tg ON tg.id=tt.tag_id "
+                              "WHERE tt.task_id=tasks.id AND tg.name=?)")
+            params.append(tag)
         if query.strip():
             predicates.append("""(
                 instr(lower(id || ' ' || task_type || ' ' || coalesce(json_extract(payload,'$.params'),'')
@@ -253,7 +375,7 @@ class SQLiteTaskStore:
             )
             return self._task_models(db, rows), total
 
-    def count_tasks(self, owner_id=None, task_type=None):
+    def count_tasks(self, owner_id=None, task_type=None, task_types=None, tag=None):
         counts = {status.value: 0 for status in TaskStatus}
         clauses, params = [], []
         if owner_id is not None:
@@ -262,6 +384,9 @@ class SQLiteTaskStore:
         if task_type is not None:
             clauses.append('task_type=?')
             params.append(task_type)
+        if task_types:
+            clauses.append('task_type IN (' + ','.join('?' for _ in task_types) + ')')
+            params.extend(task_types)
         where = ' WHERE ' + ' AND '.join(clauses) if clauses else ''
         with self._connection() as db:
             counts.update(dict(db.execute('SELECT status,count(*) FROM tasks' + where + ' GROUP BY status', params)))
@@ -291,6 +416,32 @@ class SQLiteTaskStore:
     def _save_task(self, db, task):
         db.execute('UPDATE tasks SET status=?, payload=? WHERE id=?',
                    (task.status.value, task.model_dump_json(exclude={'steps', 'artifacts'}), task.id))
+
+    def reset_task_for_retry(self, task_id, attempt):
+        with self._connection(write=True) as db:
+            row = db.execute("SELECT payload FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if row is None:
+                raise KeyError(task_id)
+            data = json.loads(row["payload"])
+            data.update(
+                {
+                    "status": "PENDING",
+                    "attempt": attempt,
+                    "retry_of": None,
+                    "result": None,
+                    "error_code": None,
+                    "error_message": None,
+                    "started_at": None,
+                    "finished_at": None,
+                }
+            )
+            db.execute(
+                "UPDATE tasks SET status = ?, payload = ? WHERE id = ?",
+                ("PENDING", json.dumps(data, ensure_ascii=False), task_id),
+            )
+            db.execute("DELETE FROM steps WHERE task_id = ?", (task_id,))
+            db.execute("DELETE FROM artifacts WHERE task_id = ?", (task_id,))
+        return self.get_task(task_id)
 
     def start_task(self, task_id):
         with self._connection(write=True) as db:
@@ -344,6 +495,45 @@ class SQLiteTaskStore:
             db.execute('INSERT INTO artifacts VALUES (?, ?, ?, ?)',
                        (artifact.id, artifact.task_id, artifact.relative_path, artifact.model_dump_json()))
         return artifact
+
+    def add_task_message(self, task_id, role, content):
+        message = TaskChatMessage(
+            id=uuid.uuid4().hex,
+            task_id=task_id,
+            role=role,
+            content=content,
+            created_at=utc_now(),
+        )
+        with self._connection(write=True) as db:
+            db.execute(
+                'INSERT INTO task_messages (id, task_id, role, content, created_at) VALUES (?,?,?,?,?)',
+                (
+                    message.id,
+                    message.task_id,
+                    message.role,
+                    message.content,
+                    message.created_at.isoformat(),
+                ),
+            )
+        return message
+
+    def list_task_messages(self, task_id, limit=50):
+        with self._connection() as db:
+            rows = db.execute(
+                'SELECT * FROM task_messages WHERE task_id=? ORDER BY created_at DESC LIMIT ?',
+                (task_id, limit),
+            ).fetchall()
+        items = [
+            TaskChatMessage(
+                id=row['id'],
+                task_id=row['task_id'],
+                role=row['role'],
+                content=row['content'],
+                created_at=datetime.fromisoformat(row['created_at']),
+            )
+            for row in rows
+        ]
+        return list(reversed(items))
 
     def get_artifact(self, artifact_id):
         with self._connection() as db:
@@ -561,6 +751,14 @@ class SQLiteTaskStore:
             row = db.execute('SELECT * FROM knowledge_bases WHERE id = ?', (kb_id,)).fetchone()
         return self._kb_from_row(row) if row is not None else None
 
+    def rename_knowledge_base(self, kb_id, owner_id, name):
+        with self._connection(write=True) as db:
+            cursor = db.execute(
+                'UPDATE knowledge_bases SET name = ? WHERE id = ? AND owner_id = ?',
+                (name, kb_id, owner_id),
+            )
+            return cursor.rowcount > 0
+
     def delete_knowledge_base(self, kb_id):
         with self._connection(write=True) as db:
             db.execute('DELETE FROM kb_documents WHERE kb_id = ?', (kb_id,))
@@ -581,19 +779,41 @@ class SQLiteTaskStore:
             id=row['id'], kb_id=row['kb_id'], task_id=row['task_id'],
             title=row['title'], url=row['url'], content=row['content'],
             chunk_count=row['chunk_count'], created_at=datetime.fromisoformat(row['created_at']),
+            artifact_name=row['artifact_name'], kind=row['kind'] or 'text',
+            orphaned=bool(row['orphaned']),
         )
 
-    def add_kb_document(self, kb_id, *, title, url, content, task_id=None):
+    def add_kb_document(self, kb_id, *, title, url, content, task_id=None, artifact_name=None, kind="text"):
         record = KbDocumentRecord(
             kb_id=kb_id, title=title, url=url, content=content, task_id=task_id,
+            artifact_name=artifact_name, kind=kind,
         )
         with self._connection(write=True) as db:
             db.execute(
-                'INSERT INTO kb_documents (id, kb_id, task_id, title, url, content, chunk_count, created_at) '
-                'VALUES (?,?,?,?,?,?,?,?)',
-                (record.id, kb_id, task_id, title, url, content, 0, record.created_at.isoformat()),
+                'INSERT INTO kb_documents '
+                '(id, kb_id, task_id, title, url, content, chunk_count, created_at, artifact_name, kind) '
+                'VALUES (?,?,?,?,?,?,?,?,?,?)',
+                (
+                    record.id, kb_id, task_id, title, url, content, 0,
+                    record.created_at.isoformat(), artifact_name, kind,
+                ),
             )
         return record
+
+    def find_kb_document(self, kb_id, task_id, artifact_name):
+        with self._connection() as db:
+            row = db.execute(
+                'SELECT * FROM kb_documents WHERE kb_id = ? AND task_id = ? AND artifact_name = ?',
+                (kb_id, task_id, artifact_name),
+            ).fetchone()
+        return self._kb_doc_from_row(row) if row is not None else None
+
+    def mark_kb_documents_orphaned(self, task_id):
+        with self._connection(write=True) as db:
+            cursor = db.execute(
+                'UPDATE kb_documents SET orphaned = 1 WHERE task_id = ?', (task_id,)
+            )
+        return cursor.rowcount
 
     def list_kb_documents(self, kb_id):
         with self._connection() as db:
@@ -602,6 +822,17 @@ class SQLiteTaskStore:
                 (kb_id,),
             ).fetchall()
         return [self._kb_doc_from_row(row) for row in rows]
+
+    def list_task_kb_documents(self, task_id, owner_id):
+        with self._connection() as db:
+            rows = db.execute(
+                'SELECT d.kb_id, k.name, d.id FROM kb_documents d'
+                ' JOIN knowledge_bases k ON k.id = d.kb_id'
+                ' WHERE d.task_id = ? AND k.owner_id = ?'
+                ' ORDER BY d.created_at DESC',
+                (task_id, owner_id),
+            ).fetchall()
+        return [(row['kb_id'], row['name'], row['id']) for row in rows]
 
     def get_kb_document(self, document_id):
         with self._connection() as db:
@@ -612,35 +843,338 @@ class SQLiteTaskStore:
         with self._connection(write=True) as db:
             db.execute('UPDATE kb_documents SET chunk_count = ? WHERE id = ?', (count, document_id))
 
+    def update_kb_document_title(self, document_id, title):
+        with self._connection(write=True) as db:
+            cursor = db.execute('UPDATE kb_documents SET title = ? WHERE id = ?', (title, document_id))
+            return cursor.rowcount > 0
+
     def delete_kb_document(self, document_id):
         with self._connection(write=True) as db:
             cursor = db.execute('DELETE FROM kb_documents WHERE id = ?', (document_id,))
             return cursor.rowcount > 0
 
-    def add_kb_message(self, kb_id, question, answer, citations):
-        record = KbMessageRecord(kb_id=kb_id, question=question, answer=answer, citations=list(citations))
+    def add_kb_message(self, kb_id, question, answer, citations, conversation_id="default"):
+        record = KbMessageRecord(
+            kb_id=kb_id,
+            question=question,
+            answer=answer,
+            citations=list(citations),
+            conversation_id=conversation_id or "default",
+        )
         with self._connection(write=True) as db:
             db.execute(
-                'INSERT INTO kb_messages (id, kb_id, question, answer, citations, created_at) VALUES (?,?,?,?,?,?)',
+                "INSERT INTO kb_messages (id, kb_id, question, answer, citations, conversation_id, created_at)"
+                " VALUES (?,?,?,?,?,?,?)",
                 (
-                    record.id, kb_id, question, answer,
+                    record.id,
+                    kb_id,
+                    question,
+                    answer,
                     json.dumps([c.model_dump() for c in citations], ensure_ascii=False),
+                    record.conversation_id,
                     record.created_at.isoformat(),
                 ),
             )
         return record
 
-    def list_kb_messages(self, kb_id, limit=50):
+    def list_kb_conversations(self, kb_id, limit=50):
+        messages = self.list_kb_messages(kb_id, limit=1000)
+        groups = {}
+        for msg in sorted(messages, key=lambda item: item.created_at):
+            item = groups.setdefault(msg.conversation_id, {"id": msg.conversation_id, "title": msg.question, "count": 0, "updated_at": msg.created_at})
+            item["count"] += 1
+            item["updated_at"] = msg.created_at
         with self._connection() as db:
-            rows = db.execute(
-                'SELECT * FROM kb_messages WHERE kb_id = ? ORDER BY created_at DESC LIMIT ?',
-                (kb_id, limit),
-            ).fetchall()
+            titles = {
+                row["id"]: (row["title"], row["updated_at"])
+                for row in db.execute("SELECT id, title, updated_at FROM kb_conversations WHERE kb_id = ?", (kb_id,))
+            }
+        for cid, (title, updated) in titles.items():
+            item = groups.setdefault(cid, {"id": cid, "title": title, "count": 0, "updated_at": updated})
+            item["title"] = title
+            if item["count"] == 0:
+                item["updated_at"] = updated
+        rows = sorted(groups.values(), key=lambda item: item["updated_at"], reverse=True)
+        return rows[:limit]
+
+    def list_kb_messages(self, kb_id, limit=50, conversation_id=None):
+        sql = "SELECT * FROM kb_messages WHERE kb_id = ?"
+        params: list = [kb_id]
+        if conversation_id:
+            sql += " AND conversation_id = ?"
+            params.append(conversation_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as db:
+            rows = db.execute(sql, tuple(params)).fetchall()
         return [
             KbMessageRecord(
-                id=row['id'], kb_id=row['kb_id'], question=row['question'], answer=row['answer'],
-                citations=[KbCitation(**c) for c in json.loads(row['citations'])],
-                created_at=datetime.fromisoformat(row['created_at']),
+                id=row["id"],
+                kb_id=row["kb_id"],
+                question=row["question"],
+                answer=row["answer"],
+                citations=[KbCitation(**c) for c in json.loads(row["citations"])],
+                conversation_id=(row["conversation_id"] if "conversation_id" in row.keys() else "default"),
+                created_at=datetime.fromisoformat(row["created_at"]),
             )
             for row in rows
         ]
+
+    # ---------- 知识库切片与检索 ----------
+
+    _fts_ready = False
+
+    def _ensure_chunk_fts(self, db) -> bool:
+        if SQLiteTaskStore._fts_ready:
+            return True
+        try:
+            db.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS kb_chunks_fts USING fts5("
+                "text, heading, content='kb_chunks', content_rowid='id', tokenize='unicode61')"
+            )
+            db.execute(
+                "CREATE TRIGGER IF NOT EXISTS kb_chunks_ai AFTER INSERT ON kb_chunks BEGIN "
+                "INSERT INTO kb_chunks_fts(rowid, text, heading) VALUES (new.id, new.text, new.heading); END"
+            )
+            db.execute(
+                "CREATE TRIGGER IF NOT EXISTS kb_chunks_ad AFTER DELETE ON kb_chunks BEGIN "
+                "INSERT INTO kb_chunks_fts(kb_chunks_fts, rowid, text, heading) VALUES('delete', old.id, old.text, old.heading); END"
+            )
+            SQLiteTaskStore._fts_ready = True
+            return True
+        except sqlite3.OperationalError:
+            return False
+
+    def replace_kb_chunks(self, kb_id: str, document_id: str, chunks: list[dict]) -> int:
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._connection(write=True) as db:
+            self._ensure_chunk_fts(db)
+            db.execute("DELETE FROM kb_chunks WHERE document_id = ?", (document_id,))
+            rows = [
+                (kb_id, document_id, index, item.get("heading", ""), item["text"], now)
+                for index, item in enumerate(chunks)
+            ]
+            db.executemany(
+                "INSERT INTO kb_chunks (kb_id, document_id, chunk_index, heading, text, created_at)"
+                " VALUES (?,?,?,?,?,?)",
+                rows,
+            )
+        return len(rows)
+
+    def delete_kb_chunks(self, document_id: str) -> None:
+        with self._connection(write=True) as db:
+            db.execute("DELETE FROM kb_chunks WHERE document_id = ?", (document_id,))
+
+    def search_kb_chunks(
+        self, kb_id: str, query: str, limit: int = 20,
+        document_ids: list[str] | None = None, kinds: list[str] | None = None,
+    ) -> list[dict]:
+        tokens = [token for token in __import__("re").findall(r"\w+", query) if len(token) > 1][:8]
+        if not tokens:
+            return []
+        filters = ["c.kb_id = ?"]
+        params: list = [kb_id]
+        if document_ids:
+            filters.append("c.document_id IN (%s)" % ",".join("?" for _ in document_ids))
+            params.extend(document_ids)
+        if kinds:
+            filters.append("d.kind IN (%s)" % ",".join("?" for _ in kinds))
+            params.extend(kinds)
+        where = " AND ".join(filters)
+        with self._connection() as db:
+            has_fts = self._ensure_chunk_fts(db)
+            if has_fts:
+                try:
+                    match = " OR ".join(f'"{token}"' for token in tokens)
+                    rows = db.execute(
+                        "SELECT c.text, c.heading, c.document_id, d.title, d.url, bm25(kb_chunks_fts) AS rank "
+                        "FROM kb_chunks_fts JOIN kb_chunks c ON c.id = kb_chunks_fts.rowid "
+                        "JOIN kb_documents d ON d.id = c.document_id "
+                        f"WHERE kb_chunks_fts MATCH ? AND {where} ORDER BY rank LIMIT ?",
+                        (match, *params, limit),
+                    ).fetchall()
+                    if rows:
+                        return [
+                            {"text": row["text"], "heading": row["heading"], "document_id": row["document_id"],
+                             "title": row["title"], "url": row["url"], "rank": 1.0 / (1.0 + abs(row["rank"]))}
+                            for row in rows
+                        ]
+                except sqlite3.OperationalError:
+                    pass
+            rows = db.execute(
+                "SELECT c.text, c.heading, c.document_id, d.title, d.url "
+                "FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id "
+                f"WHERE {where}",
+                tuple(params),
+            ).fetchall()
+        hits = []
+        for row in rows:
+            haystack = f"{row['heading']} {row['text']}".lower()
+            score = sum(haystack.count(token.lower()) for token in tokens)
+            if score:
+                hits.append({
+                    "text": row["text"], "heading": row["heading"], "document_id": row["document_id"],
+                    "title": row["title"], "url": row["url"], "rank": float(score),
+                })
+        hits.sort(key=lambda item: item["rank"], reverse=True)
+        if not hits:
+            for row in rows[:limit]:
+                hits.append({
+                    "text": row["text"], "heading": row["heading"],
+                    "document_id": row["document_id"], "title": row["title"],
+                    "url": row["url"], "rank": 0.1,
+                })
+        return hits[:limit]
+
+    # ---------- 会话标题 ----------
+
+    def upsert_kb_conversation(self, kb_id: str, owner_id: str, conversation_id: str, title: str) -> None:
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._connection(write=True) as db:
+            db.execute(
+                "INSERT INTO kb_conversations (id, kb_id, owner_id, title, created_at, updated_at)"
+                " VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
+                (conversation_id, kb_id, owner_id, title[:80] or "新对话", now, now),
+            )
+
+    def rename_kb_conversation(self, kb_id: str, owner_id: str, conversation_id: str, title: str) -> bool:
+        with self._connection(write=True) as db:
+            cursor = db.execute(
+                "UPDATE kb_conversations SET title = ?, updated_at = ? WHERE id = ? AND kb_id = ? AND owner_id = ?",
+                (title[:80] or "新对话", datetime.now(timezone.utc).isoformat(timespec="seconds"), conversation_id, kb_id, owner_id),
+            )
+            return cursor.rowcount > 0
+
+    def delete_kb_conversation(self, kb_id: str, owner_id: str, conversation_id: str) -> bool:
+        with self._connection(write=True) as db:
+            owned = db.execute(
+                "SELECT 1 FROM kb_conversations WHERE id = ? AND kb_id = ? AND owner_id = ?",
+                (conversation_id, kb_id, owner_id),
+            ).fetchone()
+            if not owned:
+                return False
+            db.execute("DELETE FROM kb_messages WHERE kb_id = ? AND conversation_id = ?", (kb_id, conversation_id))
+            db.execute("DELETE FROM kb_conversations WHERE id = ?", (conversation_id,))
+            return True
+
+    # ---------- 标签 ----------
+
+    def create_tag(self, owner_id: str, name: str):
+        from backend.models import TagRecord
+
+        name = name.strip()[:24]
+        if not name:
+            raise ValueError("标签名不能为空")
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._connection(write=True) as db:
+            row = db.execute("SELECT * FROM tags WHERE owner_id=? AND name=?", (owner_id, name)).fetchone()
+            if row:
+                return TagRecord(id=row["id"], owner_id=row["owner_id"], name=row["name"])
+            record = TagRecord(owner_id=owner_id, name=name)
+            db.execute(
+                "INSERT INTO tags (id, owner_id, name, created_at) VALUES (?,?,?,?)",
+                (record.id, owner_id, name, now),
+            )
+        return record
+
+    def list_tags(self, owner_id: str):
+        from backend.models import TagRecord
+
+        with self._connection() as db:
+            rows = db.execute("SELECT * FROM tags WHERE owner_id=? ORDER BY name", (owner_id,)).fetchall()
+        return [TagRecord(id=row["id"], owner_id=row["owner_id"], name=row["name"]) for row in rows]
+
+    def set_task_tags(self, task_id: str, owner_id: str, names):
+        with self._connection(write=True) as db:
+            db.execute("DELETE FROM task_tags WHERE task_id=?", (task_id,))
+        cleaned = list(dict.fromkeys([n.strip()[:24] for n in names if n.strip()]))[:8]
+        for name in cleaned:
+            tag = self.create_tag(owner_id, name)
+            with self._connection(write=True) as db:
+                db.execute("INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?,?)", (task_id, tag.id))
+        return self.get_task_tags(task_id)
+
+    def get_task_tags(self, task_id: str):
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT tg.name FROM task_tags tt JOIN tags tg ON tg.id=tt.tag_id WHERE tt.task_id=? ORDER BY tg.name",
+                (task_id,),
+            ).fetchall()
+        return [row["name"] for row in rows]
+
+    def set_document_tags(self, document_id: str, owner_id: str, names):
+        cleaned = list(dict.fromkeys([n.strip()[:24] for n in names if n.strip()]))[:8]
+        with self._connection(write=True) as db:
+            db.execute("DELETE FROM kb_document_tags WHERE document_id=?", (document_id,))
+        for name in cleaned:
+            tag = self.create_tag(owner_id, name)
+            with self._connection(write=True) as db:
+                db.execute("INSERT OR IGNORE INTO kb_document_tags (document_id, tag_id) VALUES (?,?)",
+                           (document_id, tag.id))
+        return self.get_document_tags(document_id)
+
+    def get_document_tags(self, document_id: str):
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT tg.name FROM kb_document_tags dt JOIN tags tg ON tg.id=dt.tag_id "
+                "WHERE dt.document_id=? ORDER BY tg.name",
+                (document_id,),
+            ).fetchall()
+        return [row["name"] for row in rows]
+
+    # ---------- 批注 ----------
+
+    def add_annotation(self, owner_id: str, *, task_id=None, document_id=None, artifact_name="article.md",
+                       block_index=0, start_offset=0, end_offset=0, quote="", note=""):
+        from backend.models import AnnotationRecord
+
+        record = AnnotationRecord(
+            owner_id=owner_id, task_id=task_id, document_id=document_id, artifact_name=artifact_name,
+            block_index=block_index, start_offset=start_offset, end_offset=end_offset, quote=quote, note=note,
+        )
+        with self._connection(write=True) as db:
+            db.execute(
+                "INSERT INTO annotations (id, owner_id, task_id, document_id, artifact_name, block_index,"
+                " start_offset, end_offset, quote, note, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (record.id, owner_id, task_id, document_id, artifact_name, block_index, start_offset,
+                 end_offset, quote, note, record.created_at.isoformat(timespec="seconds")),
+            )
+        return record
+
+    def list_annotations(self, *, task_id=None, document_id=None, owner_id=None):
+        from backend.models import AnnotationRecord
+
+        clauses, params = [], []
+        if task_id:
+            clauses.append("task_id=?"); params.append(task_id)
+        if document_id:
+            clauses.append("document_id=?"); params.append(document_id)
+        if owner_id:
+            clauses.append("owner_id=?"); params.append(owner_id)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        with self._connection() as db:
+            rows = db.execute("SELECT * FROM annotations" + where + " ORDER BY created_at", params).fetchall()
+        return [
+            AnnotationRecord(
+                id=row["id"], owner_id=row["owner_id"], task_id=row["task_id"], document_id=row["document_id"],
+                artifact_name=row["artifact_name"], block_index=row["block_index"],
+                start_offset=row["start_offset"], end_offset=row["end_offset"],
+                quote=row["quote"], note=row["note"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        ]
+
+    def update_annotation(self, annotation_id: str, owner_id: str, note: str):
+        with self._connection(write=True) as db:
+            cursor = db.execute("UPDATE annotations SET note=? WHERE id=? AND owner_id=?",
+                                (note, annotation_id, owner_id))
+            if not cursor.rowcount:
+                return None
+        rows = self.list_annotations(owner_id=owner_id)
+        return next((item for item in rows if item.id == annotation_id), None)
+
+    def delete_annotation(self, annotation_id: str, owner_id: str) -> bool:
+        with self._connection(write=True) as db:
+            return db.execute("DELETE FROM annotations WHERE id=? AND owner_id=?",
+                              (annotation_id, owner_id)).rowcount > 0

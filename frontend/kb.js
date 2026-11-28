@@ -17,6 +17,10 @@
   const docEmpty = $("#kb-doc-empty");
   const docCount = $("#kb-doc-count");
   const messages = $("#kb-messages");
+  const scopeLabel = $("#kb-scope");
+  const newChatButton = $("#kb-new-chat");
+  const useHistoryInput = $("#kb-use-history");
+  let conversationId = "default";
   const questionInput = $("#kb-question");
   const askForm = $("#kb-ask-form");
   const kbDialog = $("#kb-dialog");
@@ -58,6 +62,8 @@
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     })[char]);
 
+  window.addEventListener("hashchange", () => setMode(location.hash === "#kb" ? "kb" : "tasks"));
+
   const setMode = (next) => {
     mode = next;
     tabTasks.classList.toggle("is-active", next === "tasks");
@@ -95,6 +101,8 @@
     }
   };
 
+  const DOC_KINDS = { web_digest: "网页整理", web_compare: "网页对比", items: "条目表" };
+
   const renderDocuments = (docs) => {
     docCount.textContent = `${docs.length} 篇`;
     docEmpty.hidden = docs.length > 0;
@@ -106,6 +114,8 @@
         <div class="kb-doc-meta">
           <span>${new Date(doc.created_at).toLocaleString("zh-CN", { hour12: false })}</span>
           <span>${doc.chunk_count} 段</span>
+          ${doc.kind && doc.kind !== "text" ? `<span class="kb-tag">${escapeHtml(DOC_KINDS[doc.kind] || doc.kind)}</span>` : ""}
+          ${doc.orphaned ? '<span class="kb-tag muted">来源任务已删除</span>' : ""}
         </div>
         <div class="kb-doc-actions">
           <button type="button" class="link-button" data-action="ask">加入问答</button>
@@ -153,7 +163,12 @@
     messages.innerHTML = "";
     chatLog = [];
     if (!current) return;
-    const rows = await api(`/kb/${current.id}/messages?limit=20`);
+    if (scopeLabel) {
+      scopeLabel.textContent = `${current.name} · 仅检索本知识库`;
+    }
+    const rows = await api(
+      `/kb/${current.id}/messages?limit=20&conversation_id=${encodeURIComponent(conversationId)}`,
+    );
     if (!rows.length) {
       messages.innerHTML = '<p class="empty-hint">选中知识库后，在下方输入问题。</p>';
       return;
@@ -179,6 +194,8 @@
           question,
           top_k: Number(topkInput.value),
           min_score: Number(scoreInput.value) / 100,
+          conversation_id: conversationId,
+          use_history: Boolean(useHistoryInput?.checked),
         }),
       });
       appendMessage("assistant", answer.answer, answer.citations);
@@ -379,6 +396,12 @@
   $("#kb-form").addEventListener("submit", createBase);
   docList.addEventListener("click", onDocAction);
   askForm.addEventListener("submit", ask);
+  newChatButton?.addEventListener("click", () => {
+    conversationId = `c-${Date.now()}`;
+    chatLog = [];
+    messages.innerHTML = '<p class="empty-hint">新对话已开始，只带本知识库的资料。</p>';
+    questionInput.focus();
+  });
   $("#ingest-cancel").addEventListener("click", () => ingestDialog.close());
   $("#ingest-dialog-cancel").addEventListener("click", () => ingestDialog.close());
   $("#ingest-confirm").addEventListener("click", confirmIngest);

@@ -182,8 +182,8 @@ class AdvancedApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["detail"]["code"], "TASK_NOT_CANCELLABLE")
 
-    def test_retry_failed_task_creates_new_attempt(self) -> None:
-        """重试生成新任务并保留 attempt/retry_of 关系，原记录不覆盖。"""
+    def test_retry_failed_task_reuses_same_row(self) -> None:
+        """重试复用同一条任务记录，只递增 attempt，不新建任务条。"""
         self.make_client([(TaskType.MOCK, FailingTemplate())])
         created = self.client.post("/tasks", json={"task_type": "MOCK", "params": {}}).json()
         self.assertEqual(self.client.get(f"/tasks/{created['id']}").json()["status"], "FAILED")
@@ -192,11 +192,10 @@ class AdvancedApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 202)
         retried = response.json()
-        self.assertNotEqual(retried["id"], created["id"])
+        self.assertEqual(retried["id"], created["id"])
         self.assertEqual(retried["attempt"], 2)
-        self.assertEqual(retried["retry_of"], created["id"])
+        self.assertIsNone(retried["retry_of"])
         self.assertEqual(self.client.get(f"/tasks/{created['id']}").json()["status"], "FAILED")
-        self.assertEqual(self.client.get(f"/tasks/{retried['id']}").json()["status"], "FAILED")
 
     def test_retry_successful_task_returns_conflict(self) -> None:
         """成功任务不允许重试。"""
@@ -209,8 +208,8 @@ class AdvancedApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["detail"]["code"], "TASK_NOT_RETRYABLE")
 
-    def test_retry_csv_task_without_input_returns_conflict(self) -> None:
-        """输入文件已被清理时，不应创建注定失败的重试任务。"""
+    def test_retry_csv_task_without_input_fails_in_place(self) -> None:
+        """输入文件缺失时允许重试，但任务会在同一条记录上失败并给出原因。"""
         self.make_client([(TaskType.MOCK, RecordingTemplate())])
         store = self.app.state.task_store
         task = store.create_task(TaskType.CSV_ANALYSIS, {})
@@ -218,9 +217,12 @@ class AdvancedApiTests(unittest.TestCase):
 
         response = self.client.post(f"/tasks/{task.id}/retry")
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["detail"]["code"], "INPUT_NOT_FOUND")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["id"], task.id)
         self.assertEqual(store.count_tasks()["total"], 1)
+        final = self.client.get(f"/tasks/{task.id}").json()
+        self.assertEqual(final["status"], "FAILED")
+        self.assertEqual(final["error_code"], "VALIDATION_ERROR")
 
     def test_task_list_supports_pagination_search_and_counts(self) -> None:
         """列表返回分页元数据，搜索和状态筛选互不影响全量统计。"""

@@ -25,10 +25,12 @@ from backend.sqlite_store import SQLiteTaskStore
 from backend.logging_config import configure_logging
 from backend.models import HealthResponse, TaskType, UserRecord
 from backend.kb import ChromaIndex, KnowledgeBaseService
-from backend.llm import llm_client
+from backend.task_chat import TaskChatService
+from backend.llm import LLMClient, llm_client
 from backend.routes_auth import router as auth_router
 from backend.routes_csv import router as csv_router
 from backend.routes_kb import router as kb_router
+from backend.routes_tags import router as tags_router
 from backend.routes_notifications import router as notifications_router
 from backend.routes_schedules import router as schedules_router
 from backend.routes_tasks import router as tasks_router
@@ -42,6 +44,7 @@ from backend.templates.mock import MockTemplate
 from backend.templates.repo_check import RepoCheckTemplate
 from backend.templates.web_accept import WebAcceptTemplate
 from backend.templates.web_collect import WebDigestTemplate
+from backend.templates.web_compare import WebCompareTemplate
 
 
 class UTF8JSONResponse(JSONResponse):
@@ -80,8 +83,9 @@ def create_app(
     )
     selected_templates = list(templates) if templates is not None else [
         (TaskType.MOCK, MockTemplate(selected_adapter)),
-        (TaskType.CSV_ANALYSIS, CsvAnalysisTemplate(selected_adapter)),
+        (TaskType.CSV_ANALYSIS, CsvAnalysisTemplate(selected_adapter, llm=llm_client)),
         (TaskType.WEB_DIGEST, WebDigestTemplate(selected_adapter)),
+        (TaskType.WEB_COMPARE, WebCompareTemplate(selected_adapter)),
         (TaskType.REPO_CHECK, RepoCheckTemplate(selected_adapter)),
         (TaskType.WEB_ACCEPTANCE, WebAcceptTemplate(selected_adapter)),
     ]
@@ -110,10 +114,13 @@ def create_app(
             kb_index = ChromaIndex(settings.CHROMA_PATH)
         except Exception:  # pragma: no cover - 环境缺依赖时走降级
             kb_index = None
+        kb_answer_llm = LLMClient(model=settings.KB_LLM_MODEL) if settings.KB_LLM_MODEL and settings.KB_LLM_MODEL != settings.LLM_MODEL else None
         app.state.kb_service = KnowledgeBaseService(
-            selected_store, selected_artifacts, llm_client, kb_index,
+            selected_store, selected_artifacts, llm_client, kb_index, kb_answer_llm,
         )
         app.state.kb_index = kb_index
+        selected_runner.kb = app.state.kb_service
+        app.state.task_chat = TaskChatService(selected_store, selected_artifacts, llm_client)
         # 定时任务线程随应用启动/停止，避免测试或重启后残留后台扫描。
         nonlocal selected_schedules
         selected_schedules = ScheduleRunner(selected_store, selected_runner)
@@ -134,6 +141,7 @@ def create_app(
     app.include_router(tasks_router)
     app.include_router(csv_router)
     app.include_router(kb_router)
+    app.include_router(tags_router)
     app.include_router(auth_router)
     app.include_router(schedules_router)
     app.include_router(notifications_router)

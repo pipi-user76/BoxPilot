@@ -5,9 +5,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BoxPilot 任务工作台</title>
-  <link rel="stylesheet" href="styles.css?v=20261127-22">
+  <style>html,body{background:#f4f6f9}body{margin:0;min-height:100vh;color:#111827}</style>
+  <link rel="stylesheet" href="styles.css?v=20261128-42">
   <link rel="stylesheet" href="schedules.css?v=20261127-30">
-  <link rel="stylesheet" href="kb.css?v=20261127-45">
+  <link rel="stylesheet" href="kb.css?v=20261128-16">
+  <script type="speculationrules">
+  {"prefetch":[{"source":"list","urls":["task_list.html","kb.html","schedules.html","users.html"]}]}
+  </script>
+  <script defer src="nav.js?v=20261128-1"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -33,6 +38,10 @@
         </a>
 
         <p class="side-title">功能</p>
+        <a class="side-link with-icon" href="kb.html">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v18H7.5A2.5 2.5 0 0 1 5 18.5v-13Z"/><path d="M9 7h6M9 11h6"/></svg>
+          <span>知识库</span>
+        </a>
         <a class="side-link with-icon feature-link" data-type="WEB_DIGEST" href="task_list.html?type=WEB_DIGEST">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.2 3.6 8.5S14.4 18.2 12 20.5C9.6 18.2 8.4 15.3 8.4 12S9.6 5.8 12 3.5Z"/></svg>
           <span>网页资料整理</span>
@@ -100,11 +109,6 @@
               创建任务
             </button>
           </div>
-        </div>
-
-        <div id="feature-tabs" class="feature-tabs" hidden>
-          <button id="feature-tab-tasks" class="feature-tab is-active" type="button">任务列表</button>
-          <button id="feature-tab-kb" class="feature-tab" type="button">我的知识库</button>
         </div>
 
         <div class="tabs" role="tablist" aria-label="按状态筛选">
@@ -178,52 +182,6 @@
           </nav>
         </section>
 
-        <section id="kb-panel" class="panel kb-panel" hidden>
-          <div class="kb-toolbar">
-            <label class="inline-control">
-              <span>知识库</span>
-              <select id="kb-select" aria-label="选择知识库"></select>
-            </label>
-            <button id="kb-new" class="button secondary small" type="button">新建知识库</button>
-            <button id="kb-upload" class="button secondary small" type="button">上传文档</button>
-            <input id="kb-file" type="file" accept=".pdf,.txt,.md" hidden>
-            <span id="kb-hint" class="muted kb-hint"></span>
-            <button id="kb-import-selected" class="button primary small" type="button" disabled>存入所选任务</button>
-          </div>
-
-          <div class="kb-layout">
-            <div class="kb-docs">
-              <div class="kb-docs-head">
-                <strong>文档</strong>
-                <span id="kb-doc-count" class="muted">0 篇</span>
-              </div>
-              <div id="kb-doc-list" class="kb-doc-list"></div>
-              <div id="kb-doc-empty" class="empty-state" hidden>
-                <strong>还没有文档</strong>
-                <span>在任务详情里点“存入知识库”，或勾选任务后批量入库。</span>
-              </div>
-            </div>
-
-            <div class="kb-chat">
-              <div id="kb-messages" class="kb-messages" aria-live="polite"></div>
-              <div class="kb-controls">
-                <label class="kb-slider">
-                  <span>检索条数 <em id="kb-topk-value">4</em></span>
-                  <input id="kb-topk" type="range" min="1" max="10" step="1" value="4">
-                </label>
-                <label class="kb-slider">
-                  <span>相似度阈值 <em id="kb-score-value">0%</em></span>
-                  <input id="kb-score" type="range" min="0" max="100" step="5" value="0">
-                </label>
-                <button id="kb-export" class="button ghost small" type="button">导出对话</button>
-              </div>
-              <form id="kb-ask-form" class="kb-ask">
-                <input id="kb-question" type="text" placeholder="向知识库提问，例如：这篇文档的核心结论是什么？" autocomplete="off" aria-label="向知识库提问">
-                <button id="kb-ask" class="button primary" type="submit">提问</button>
-              </form>
-            </div>
-          </div>
-        </section>
       </main>
     </div>
 
@@ -269,59 +227,10 @@
     </div>
   </dialog>
 
-  <dialog id="kb-dialog" class="create-dialog">
-    <form id="kb-form" method="dialog">
-      <div class="preview-header">
-        <div>
-          <p class="eyebrow">新建知识库</p>
-          <h2>知识库信息</h2>
-        </div>
-        <button id="kb-dialog-cancel" class="icon-button" type="button" aria-label="关闭">×</button>
-      </div>
-      <div class="create-fields">
-        <label class="field">
-          <span class="field-label">名称</span>
-          <input id="kb-name" type="text" maxlength="80" placeholder="例如：竞赛资料" required>
-        </label>
-        <label class="field">
-          <span class="field-label">备注</span>
-          <input id="kb-note" type="text" maxlength="400" placeholder="可选，说明这个知识库存什么">
-        </label>
-        <p id="kb-error" class="create-error" hidden></p>
-      </div>
-      <div class="create-footer">
-        <button id="kb-cancel" class="button secondary" type="button">取消</button>
-        <button id="kb-submit" class="button primary" type="submit">创建</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="ingest-dialog" class="create-dialog">
-    <form id="ingest-form" method="dialog">
-      <div class="preview-header">
-        <div>
-          <p class="eyebrow">存入知识库</p>
-          <h2 id="ingest-title">选择目标知识库</h2>
-        </div>
-        <button id="ingest-dialog-cancel" class="icon-button" type="button" aria-label="关闭">×</button>
-      </div>
-      <div class="create-fields">
-        <label class="field">
-          <span class="field-label">目标知识库</span>
-          <select id="ingest-select"></select>
-        </label>
-        <p id="ingest-hint" class="field-hint">入库后会按段落切片并生成向量，稍等几秒。</p>
-      </div>
-      <div class="create-footer">
-        <button id="ingest-cancel" class="button secondary" type="button">取消</button>
-        <button id="ingest-confirm" class="button primary" type="submit">确认入库</button>
-      </div>
-    </form>
-  </dialog>
-
   <script src="notifications.js?v=20261127-30"></script>
-  <script src="kb.js?v=20261127-44"></script>
-  <script src="task_list.js?v=20261127-21"></script>
+  <script src="kb_ingest.js?v=20261128-3"></script>
+  <script src="vendor/echarts.min.js?v=5.5.1"></script>
+  <script src="task_list.js?v=20261128-49"></script>
 </body>
 </html>
 

@@ -53,6 +53,40 @@ def chunk_text(text: str, chunk_chars: int = 800, overlap: int = 100) -> list[st
     return chunks
 
 
+def chunk_sections(text: str, chunk_chars: int = 600, overlap: int = 80) -> list[tuple[str, str]]:
+    """按 Markdown 标题分节切片，返回 (标题路径, 正文块)。"""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    sections: list[tuple[str, list[str]]] = []
+    heading_path: list[str] = []
+    buffer: list[str] = []
+    for raw in cleaned.split("\n"):
+        line = raw.rstrip()
+        match = None
+        if line.startswith("## "):
+            match = ("h2", line[3:].strip())
+        elif line.startswith("### "):
+            match = ("h3", line[4:].strip())
+        if match:
+            if buffer:
+                sections.append((" > ".join(heading_path), "\n".join(buffer).strip()))
+                buffer = []
+            if match[0] == "h2":
+                heading_path = [match[1]]
+            else:
+                heading_path = heading_path[:1] + [match[1]]
+            continue
+        buffer.append(line)
+    if buffer:
+        sections.append((" > ".join(heading_path), "\n".join(buffer).strip()))
+    chunks: list[tuple[str, str]] = []
+    for heading, body in sections:
+        for piece in chunk_text(body, chunk_chars=chunk_chars, overlap=overlap):
+            chunks.append((heading, piece))
+    return chunks
+
+
 def cosine(a: list[float], b: list[float]) -> float:
     if len(a) != len(b) or not a:
         return 0.0

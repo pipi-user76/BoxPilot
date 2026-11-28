@@ -49,6 +49,7 @@ class ArtifactStore:
             raise ValueError("artifact exceeds configured size limit")
         task_dir = self.ensure_task_dir(task_id)
         target = task_dir / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
         return ArtifactSpec(filename=filename, content_type=content_type, size_bytes=target.stat().st_size)
 

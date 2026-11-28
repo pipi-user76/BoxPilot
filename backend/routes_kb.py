@@ -3,19 +3,24 @@
 from __future__ import annotations
 
 import io
+import json
 
-from fastapi import APIRouter, File, Request, Response, UploadFile, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile, status
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.config import settings
 from backend.kb import KnowledgeBaseError, KnowledgeBaseService
 from backend.models import (
+    KnowledgeBaseRename,
     KbAskRequest,
     KbAnswer,
     KbBatchCreate,
     KbDocumentCreate,
     KbDocumentRecord,
+    KbDocumentSummary,
     KbMessageRecord,
+    KbTaskIngestRequest,
+    TaskKbDocument,
     KnowledgeBaseCreate,
     KnowledgeBaseRecord,
 )
@@ -64,6 +69,14 @@ def create_kb(payload: KnowledgeBaseCreate, request: Request):
     return _service(request).create(payload.name, payload.note, _user_id(request))
 
 
+@router.patch("/kb/{kb_id}", response_model=KnowledgeBaseRecord)
+def rename_kb(kb_id: str, payload: KnowledgeBaseRename, request: Request):
+    try:
+        return _service(request).rename(kb_id, _user_id(request), payload.name)
+    except KnowledgeBaseError as exc:
+        return _error(exc)
+
+
 @router.get("/kb", response_model=list[KnowledgeBaseRecord])
 def list_kb(request: Request):
     return _service(request).list(_user_id(request))
@@ -78,10 +91,33 @@ def delete_kb(kb_id: str, request: Request):
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/kb/{kb_id}/documents", response_model=list[KbDocumentRecord])
+@router.post("/kb/{kb_id}/ingest-task", response_model=list[KbDocumentRecord], status_code=status.HTTP_201_CREATED)
+def ingest_task(kb_id: str, payload: KbTaskIngestRequest, request: Request):
+    """把某个任务的产物收进知识库；已存在同名文档时覆盖。"""
+    service = _service(request)
+    try:
+        return service.ingest_task_artifacts(
+            kb_id, _user_id(request), payload.task_id, payload.artifacts,
+            allow_any=bool(getattr(request.state.user, "is_admin", False)),
+            include_chat=payload.include_chat,
+        )
+    except KnowledgeBaseError as exc:
+        return _error(exc)
+
+
+@router.get("/kb/{kb_id}/documents", response_model=list[KbDocumentSummary])
 def list_documents(kb_id: str, request: Request):
     try:
-        return _service(request).list_documents(kb_id, _user_id(request))
+        return _service(request).list_document_summaries(kb_id, _user_id(request))
+    except KnowledgeBaseError as exc:
+        return _error(exc)
+
+
+@router.get("/tasks/{task_id}/kb-documents", response_model=list[TaskKbDocument])
+def list_task_documents(task_id: str, request: Request):
+    """任务详情用来判断“已添加到知识库”的状态。"""
+    try:
+        return _service(request).list_task_documents(task_id, _user_id(request))
     except KnowledgeBaseError as exc:
         return _error(exc)
 
@@ -178,14 +214,70 @@ def ask(kb_id: str, payload: KbAskRequest, request: Request):
             payload.question,
             payload.top_k,
             payload.min_score,
+            payload.conversation_id,
+            payload.use_history,
+            payload.document_ids or None,
+            payload.kinds or None,
         )
     except KnowledgeBaseError as exc:
         return _error(exc)
 
 
-@router.get("/kb/{kb_id}/messages", response_model=list[KbMessageRecord])
-def history(kb_id: str, request: Request, limit: int = 50):
+@router.post("/kb/{kb_id}/ask/stream")
+def ask_stream(kb_id: str, payload: KbAskRequest, request: Request):
+    def events():
+        for item in _service(request).ask_stream(
+            kb_id, _user_id(request), payload.question, payload.top_k,
+            payload.min_score, payload.conversation_id, payload.use_history,
+            payload.document_ids or None, payload.kinds or None,
+        ):
+            yield f"event: {item['event']}\ndata: {json.dumps(item['data'], ensure_ascii=False)}\n\n"
+    return StreamingResponse(
+        events(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.patch("/kb/{kb_id}/conversations/{conversation_id}")
+def rename_conversation(kb_id: str, conversation_id: str, payload: KbConversationRename, request: Request):
     try:
-        return _service(request).history(kb_id, _user_id(request), max(1, min(limit, 100)))
+        ok = _service(request).rename_conversation(
+            kb_id, _user_id(request), conversation_id, payload.title
+        )
+    except KnowledgeBaseError as exc:
+        raise _error(exc) from exc
+    if not ok:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"ok": True}
+
+
+@router.delete("/kb/{kb_id}/conversations/{conversation_id}")
+def delete_conversation(kb_id: str, conversation_id: str, request: Request):
+    try:
+        ok = _service(request).delete_conversation(kb_id, _user_id(request), conversation_id)
+    except KnowledgeBaseError as exc:
+        raise _error(exc) from exc
+    if not ok:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"ok": True}
+
+
+@router.get("/kb/{kb_id}/conversations")
+def conversations(kb_id: str, request: Request, limit: int = 50):
+    try:
+        return _service(request).conversations(kb_id, _user_id(request), limit)
+    except KnowledgeBaseError as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/kb/{kb_id}/messages", response_model=list[KbMessageRecord])
+def history(kb_id: str, request: Request, limit: int = 50, conversation_id: str | None = None):
+    try:
+        return _service(request).history(
+            kb_id,
+            _user_id(request),
+            max(1, min(limit, 100)),
+            conversation_id or None,
+        )
     except KnowledgeBaseError as exc:
         return _error(exc)

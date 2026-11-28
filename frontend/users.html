@@ -5,9 +5,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>账号管理 · BoxPilot</title>
-  <link rel="stylesheet" href="styles.css?v=20261127-20">
+  <style>html,body{background:#f4f6f9}body{margin:0;min-height:100vh;color:#111827}</style>
+  <link rel="stylesheet" href="styles.css?v=20261128-15">
   <link rel="stylesheet" href="users.css?v=20261127-5">
   <link rel="stylesheet" href="schedules.css?v=20261127-30">
+  <script type="speculationrules">
+  {"prefetch":[{"source":"list","urls":["task_list.html","kb.html","schedules.html","users.html"]}]}
+  </script>
+  <script defer src="nav.js?v=20261128-1"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -28,6 +33,11 @@
         </a>
 
         <p class="side-title">功能</p>
+        <a class="side-link with-icon" href="kb.html">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v18H7.5A2.5 2.5 0 0 1 5 18.5v-13Z"/><path d="M9 7h6M9 11h6"/></svg>
+          <span>知识库</span>
+        </a>
+
         <a class="side-link with-icon" href="task_list.html?type=WEB_DIGEST">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.2 3.6 8.5S14.4 18.2 12 20.5C9.6 18.2 8.4 15.3 8.4 12S9.6 5.8 12 3.5Z"/></svg>
           <span>网页资料整理</span>

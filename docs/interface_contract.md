@@ -26,7 +26,7 @@ PENDING -> RUNNING -> SUCCESS / FAILED / TIMEOUT / CANCELLED
 
 超时同样有两条兜底：单步超过 `STEP_TIMEOUT_SECONDS`（默认 240 秒）落为 `STEP_TIMEOUT`，任务总时长超过 `TASK_TIMEOUT_SECONDS`（默认 900 秒）落为 `TASK_TIMEOUT`，两种情况任务状态均为 `TIMEOUT`。步骤动作放在守护线程里执行，调度器只等待有限时间，避免沙箱请求卡死拖住全局执行锁。
 
-重试不修改原任务，而是创建新任务：`attempt = 原任务.attempt + 1`，`retry_of = 原任务 ID`。只有 `FAILED`、`TIMEOUT`、`CANCELLED` 可重试。
+重试在原任务记录上进行：状态回到 `PENDING`，`attempt` 加 1，清空步骤、产物与上一轮的错误/结论，不新增任务条。只有 `FAILED`、`TIMEOUT`、`CANCELLED` 可重试。
 
 ## 2. 数据库契约
 
@@ -47,7 +47,7 @@ PENDING -> RUNNING -> SUCCESS / FAILED / TIMEOUT / CANCELLED
 | `started_at` | DATETIME | 开始时间 |
 | `finished_at` | DATETIME | 完成时间 |
 | `attempt` | INTEGER | 第几次尝试，默认 1 |
-| `retry_of` | TEXT | 重试来源任务 ID，可空 |
+| `retry_of` | TEXT | 历史重试来源，旧记录为原任务 ID；原地重试后为 null |
 
 ### steps
 
@@ -172,6 +172,8 @@ purge_tasks(statuses, older_than) -> list[str]
 | `GET` | `/tasks/artifacts/archive?task_ids=a,b` | 批量 zip（最多 50 个），按任务规范名分目录；空列表 422，超限 422 |
 | `GET` | `/artifacts/{artifact_id}/download` | 文件流，附件名带任务前缀；`?inline=1` 内联显示 |
 | `GET` | `/artifacts/{artifact_id}/preview` | `{kind,text,truncated,url,...}` |
+| `GET` | `/tasks/{task_id}/chat` | 任务对话；首次访问生成一条基于任务结论的开场消息 |
+| `POST` | `/tasks/{task_id}/chat` | `{question}` → `{messages,reply}`，回答基于任务资料并写入历史 |
 | `GET` | `/health` | 应用与沙箱健康状态 |
 | `GET` | `/schedules` | 当前用户可见的定时任务列表 |
 | `POST` | `/schedules` | `{task_type,params,cron,name}` → `ScheduleRecord`，201 |
@@ -212,12 +214,18 @@ purge_tasks(statuses, older_than) -> list[str]
 | `POST` | `/kb` | `{name, note}`，201 |
 | `DELETE` | `/kb/{kb_id}` | 删除知识库、文档与向量 |
 | `GET/POST` | `/kb/{kb_id}/documents` | 文档列表 / `{task_id}` 或 `{title,url,content}` 入库 |
+| `POST` | `/kb/{kb_id}/ingest-task` | `{task_id, include_chat}`，按任务整体入库为单条 `session.md`（结论＋报告＋对话＋产物清单），重复调用覆盖 |
+| `POST` | `/kb/{kb_id}/upload` | multipart 上传 PDF/TXT/MD |
 | `POST` | `/kb/{kb_id}/documents/batch` | `{task_ids}` 批量入库 |
 | `DELETE` | `/kb/{kb_id}/documents/{doc_id}` | 删除单篇并清向量 |
 | `POST` | `/kb/{kb_id}/documents/{doc_id}/refresh` | 重新切片、重建向量 |
-| `POST` | `/kb/{kb_id}/ask` | `{question, top_k, min_score}` → `{answer, citations, message_id}` |
+| `POST` | `/kb/{kb_id}/ask` | `{question, top_k, min_score, document_ids?, kinds?}` → `{answer, citations, message_id}` |
+| `POST` | `/kb/{kb_id}/ask/stream` | SSE：`citations` → `delta`… → `done`，可中止 |
+| `PATCH` | `/kb/{kb_id}/conversations/{cid}` | `{title}` 重命名 |
+| `DELETE` | `/kb/{kb_id}/conversations/{cid}` | 删除会话与消息 |
 | `POST` | `/kb/{kb_id}/upload` | multipart `file`，支持 `.pdf/.txt/.md`，返回文档记录 |
-| `GET` | `/kb/{kb_id}/messages` | 问答历史，含 citations |
+| `GET` | `/kb/{kb_id}/messages` | 问答历史，含 citations，可按 conversation_id 过滤 |
+| `GET` | `/kb/{kb_id}/conversations` | 会话列表：`{id,title,count,updated_at}` |
 
 - 知识库、文档和问答历史存 SQLite（`user_version=5`）；向量存 Chroma，集合 `kb_chunks`，metadata 含 `kb_id/document_id/title/url`。
 - 所有 `/kb` 接口按 `owner_id` 隔离，跨用户访问统一 404；管理员不跨用户。

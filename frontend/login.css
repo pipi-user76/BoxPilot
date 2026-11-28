@@ -1,5 +1,9 @@
 /* 文件职责：登录页样式。左侧为动态画廊，右侧为暗色账号表单；交界处做磨砂过渡。 */
 
+@view-transition { navigation: auto; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 180ms; animation-timing-function: ease-out; }
+html { background: #000; }
+
 :root {
   --stage: #000000;
   --panel: #060607;
@@ -331,3 +335,6 @@ button.shake {
   #register:hover:not(:disabled) { animation: none; }
   button.shake { animation: none; }
 }
+
+/* 登录页切页进度条使用绿色。 */
+html.is-navigating::before { background: #22c55e; }

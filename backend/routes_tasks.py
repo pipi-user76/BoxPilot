@@ -30,6 +30,8 @@ from backend.models import (
     BatchDeleteResponse,
     CleanupRequest,
     CreateTaskRequest,
+    TaskChatRequest,
+    TaskChatResponse,
     TaskListResponse,
     TaskRecord,
     TaskStatus,
@@ -96,6 +98,20 @@ def _scoped_task(request: Request, task_id: str) -> TaskRecord:
         )
     assert task is not None
     return task
+
+
+def _parse_task_types(raw: str | None) -> list[TaskType]:
+    """支持 task_type=WEB_DIGEST,WEB_COMPARE 形式的多类型筛选。"""
+    if not raw:
+        return []
+    values = [item.strip().upper() for item in raw.split(",") if item.strip()]
+    try:
+        return [TaskType(value) for value in values]
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "VALIDATION_ERROR", "message": f"unknown task type: {raw}"},
+        ) from exc
 
 
 def _parse_statuses(raw: str | None) -> list[TaskStatus] | None:
@@ -171,6 +187,14 @@ def create_batch(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "BATCH_UNSUPPORTED", "message": "CSV 任务一次只能上传一个文件"},
         )
+    if payload.task_type == TaskType.WEB_COMPARE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "BATCH_UNSUPPORTED",
+                "message": "多页对比会合并成一个任务，请提交到 POST /tasks 并在 params.urls 里给出链接",
+            },
+        )
     if payload.task_type not in runner.supported_types():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -237,28 +261,37 @@ def list_tasks(
     request: Request,
     q: str = Query("", max_length=200, description="按任务 ID、类型、参数或错误信息搜索"),
     status_filter: str | None = Query(None, alias="status", description="逗号分隔的状态筛选"),
-    task_type: TaskType | None = Query(None),
+    task_type: str | None = Query(None, description="逗号分隔的任务类型"),
     page: int = Query(1, ge=1),
     page_size: int = Query(settings.TASK_PAGE_SIZE_DEFAULT, ge=1, le=settings.TASK_PAGE_SIZE_MAX),
 ) -> TaskListResponse:
     store = _store(request)
     statuses = _parse_statuses(status_filter)
+    types = _parse_task_types(task_type)
+    type_values = [item.value for item in types]
     owner_id = _owner_filter(request)
     items, total = store.list_tasks(
         query=q,
         statuses=statuses,
-        task_type=task_type,
+        task_type=types[0] if len(types) == 1 else None,
+        task_types=type_values or None,
         page=page,
         page_size=page_size,
         owner_id=owner_id,
     )
+    for item in items:
+        item.tags = store.get_task_tags(item.id)
     return TaskListResponse(
         items=items,
         total=total,
         page=page,
         page_size=page_size,
         pages=max(1, math.ceil(total / page_size)),
-        counts=store.count_tasks(owner_id, task_type.value if task_type else None),
+        counts=store.count_tasks(
+            owner_id,
+            types[0].value if len(types) == 1 else None,
+            type_values or None,
+        ),
     )
 
 
@@ -274,6 +307,7 @@ def batch_delete_tasks(payload: BatchDeleteRequest, request: Request) -> BatchDe
         if task is None or not _visible(task, request) or task.status in {TaskStatus.PENDING, TaskStatus.RUNNING}:
             skipped.append(task_id)
             continue
+        store.mark_kb_documents_orphaned(task_id)
         store.delete_task(task_id)
         artifact_store.delete_task_dir(task_id)
         deleted += 1
@@ -296,6 +330,7 @@ def cleanup_tasks(payload: CleanupRequest, request: Request) -> BatchDeleteRespo
     # 普通用户只清理自己的历史；管理员清理全部。
     deleted_ids = store.purge_tasks(payload.statuses, cutoff, _owner_filter(request))
     for task_id in deleted_ids:
+        store.mark_kb_documents_orphaned(task_id)
         artifact_store.delete_task_dir(task_id)
     log.info("tasks_cleaned", extra={"deleted": len(deleted_ids), "older_than_days": payload.older_than_days})
     return BatchDeleteResponse(deleted=len(deleted_ids))
@@ -303,7 +338,9 @@ def cleanup_tasks(payload: CleanupRequest, request: Request) -> BatchDeleteRespo
 
 @router.get("/tasks/{task_id}", response_model=TaskRecord)
 def get_task(task_id: str, request: Request) -> TaskRecord:
-    return _scoped_task(request, task_id)
+    task = _scoped_task(request, task_id)
+    task.tags = _store(request).get_task_tags(task_id)
+    return task
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=TaskRecord, status_code=status.HTTP_202_ACCEPTED)
@@ -446,6 +483,29 @@ def _resolve_artifact(artifact_id: str, request: Request) -> tuple[TaskRecord, A
             detail={"code": "ARTIFACT_NOT_FOUND", "message": str(exc)},
         ) from exc
     return task, artifact, path
+
+
+@router.get("/tasks/{task_id}/chat", response_model=TaskChatResponse)
+def get_task_chat(task_id: str, request: Request) -> TaskChatResponse:
+    """返回任务的对话上下文；首次访问会生成一条基于任务结论的开场消息。"""
+    task = _scoped_task(request, task_id)
+    service = request.app.state.task_chat
+    return TaskChatResponse(messages=service.history(task), reply=None)
+
+
+@router.post("/tasks/{task_id}/chat", response_model=TaskChatResponse)
+def post_task_chat(task_id: str, payload: TaskChatRequest, request: Request) -> TaskChatResponse:
+    """基于任务资料回答问题，并把这一轮问答写进任务对话。"""
+    task = _scoped_task(request, task_id)
+    service = request.app.state.task_chat
+    try:
+        reply = service.ask(task, payload.question.strip())
+    except Exception as exc:  # noqa: BLE001 - 统一转成可读错误
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "LLM_UNAVAILABLE", "message": f"对话模型暂时不可用：{exc}"},
+        ) from exc
+    return TaskChatResponse(messages=service.history(task), reply=reply)
 
 
 @router.get("/artifacts/{artifact_id}/download")

@@ -1,6 +1,6 @@
 """文件职责：网页资料整理模板，提取去噪正文、整页截图和内容统计。
 
-固定步骤为 URL 校验、打开页面、正文提取（Readability 去噪，失败时退回可见文本）、
+固定步骤为 URL 校验、打开页面、正文提取（trafilatura 优先，失败时退回 Readability/可见文本）、
 整页截图和写入元数据报告。只保留 article.md 一份正文，避免同时输出 Markdown 与纯文本。
 正文为空会使任务失败，避免生成没有有效内容的伪成功产物。
 """
@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from urllib.parse import urljoin
 
 from backend.config import settings
+from backend.extract import extract_article
+from backend.llm import LLMError, llm_client
 from backend.sandbox_client import SandboxAdapter
 from backend.storage import ArtifactSpec
 from backend.templates.base import StepDefinition, StepExecutionError, StepOutcome, TaskContext
@@ -114,14 +116,40 @@ def _count_words(markdown: str) -> int:
     return len(_CJK.findall(plain)) + len(_WORD.findall(plain))
 
 
+GOAL_PRESETS = {
+    "notes": "整理成学习笔记：提炼概念、关键结论和可执行要点，按主题分节。",
+    "steps": "整理成步骤教程：按操作顺序列出前置条件、每一步做什么、如何验证。",
+    "compare": "整理成优缺点对比：分别列出优点、缺点、适用场景。",
+    "specs": "整理成参数清单：用表格列出名称、数值、单位、说明。",
+    "risks": "整理风险与局限：列出限制、坑点、前置条件和使用注意。",
+}
+
+GOAL_LABELS = {
+    "notes": "学习笔记",
+    "steps": "步骤教程",
+    "compare": "优缺点对比",
+    "specs": "参数清单",
+    "risks": "风险局限整理",
+}
+
+READING_SYSTEM = """你是严谨的阅读助手。只依据给定正文完成用户指定的阅读目标，不要补充正文没有的信息。
+用 Markdown 输出，包含三级标题分节；关键结论后用 (原文：第N段) 标注依据。
+正文超过 10000 字时只使用前 10000 字，并在开头说明这一点。"""
+
+FIELDS_SYSTEM = """你是结构化抽取器。按用户给出的字段，从正文中抽取数据。
+只输出 JSON：{"rows":[{"字段名":"值"}]}。找不到的字段填 "无数据"，不要编造。
+一页有多条记录时输出多行；只有一条时输出一行。"""
+
+
 class WebDigestTemplate:
     """提取网页正文和整页截图，并生成一份可审查的元数据报告。"""
 
     name = "WEB_DIGEST"
 
-    def __init__(self, sandbox: SandboxAdapter, timeout_s: int | None = None) -> None:
+    def __init__(self, sandbox: SandboxAdapter, timeout_s: int | None = None, llm=None) -> None:
         self.sandbox = sandbox
         self.timeout_s = timeout_s or settings.WEB_ACCEPTANCE_TIMEOUT_SECONDS
+        self.llm = llm if llm is not None else llm_client
         self.steps = (
             StepDefinition("校验网页地址", validate_public_url_step),
             StepDefinition("打开网页", self._open_page),
@@ -157,13 +185,27 @@ class WebDigestTemplate:
 
         mode = "readability"
         markdown = ""
-        result = self.sandbox.get_page_markdown()
-        if result["success"]:
-            data = result["data"] or {}
-            markdown = str(data.get("markdown") or "").strip()
-            title = str(data.get("title") or "").strip()
-            if title and not context.state.get("title"):
-                context.state["title"] = title
+        html_result = (
+            self.sandbox.get_page_html(settings.EXTRACT_MAX_HTML)
+            if hasattr(self.sandbox, "get_page_html")
+            else {"success": False, "data": {}, "error": None}
+        )
+        html = ""
+        if html_result["success"]:
+            html = str((html_result.get("data") or {}).get("html") or "")
+        if html:
+            extracted = extract_article(html, str(context.state.get("url") or ""))
+            markdown = extracted["markdown"]
+            mode = extracted["mode"]
+        if not markdown:
+            result = self.sandbox.get_page_markdown()
+            if result["success"]:
+                data = result["data"] or {}
+                markdown = str(data.get("markdown") or "").strip()
+                title = str(data.get("title") or "").strip()
+                if title and not context.state.get("title"):
+                    context.state["title"] = title
+                mode = "readability"
 
         if not markdown:
             # 部分页面（例如纯脚本渲染页面）Readability 提取不到内容，退回可见文本。
@@ -173,6 +215,7 @@ class WebDigestTemplate:
                 error = fallback["error"]
                 raise StepExecutionError(error["code"], error["message"])
             markdown = str(fallback["data"].get("text") or "").strip()
+        context.state["extract_mode"] = mode
 
         if not markdown:
             raise StepExecutionError("ARTIFACT_EMPTY", "page body is empty")
@@ -191,7 +234,10 @@ class WebDigestTemplate:
         base_url = str(context.state.get("url") or "")
         body = _tidy_markdown(_absolutize_links(markdown, base_url))
         words = _count_words(body)
-        mode_label = "Readability 去噪" if mode == "readability" else "可见文本回退"
+        mode_label = {
+            "trafilatura": "trafilatura 正文提取",
+            "readability": "Readability 去噪",
+        }.get(mode, "可见文本回退")
         article_spec = context.artifact_store.write_text(
             context.task_id,
             "article.md",
@@ -310,12 +356,106 @@ class WebDigestTemplate:
         size_kb = max(1, round(spec.size_bytes / 1024))
         return StepOutcome(output=f"整页截图已保存，大小约 {size_kb} KB", artifacts=[spec])
 
+    def _goal_instruction(self, context: TaskContext) -> str:
+        raw = str(context.params.get("goal") or "").strip()
+        if not raw:
+            return ""
+        return GOAL_PRESETS.get(raw, raw)[:500]
+
+    def _declared_fields(self, context: TaskContext) -> list[tuple[str, str]]:
+        raw = context.params.get("fields") or []
+        fields: list[tuple[str, str]] = []
+        for item in raw if isinstance(raw, list) else []:
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+                desc = str(item.get("description") or item.get("desc") or "").strip()
+            else:
+                name, _, desc = str(item).partition(":")
+                name, desc = name.strip(), desc.strip()
+            if name:
+                fields.append((name[:40], desc[:120]))
+        return fields[:8]
+
+    def _extract_fields(
+        self, fields: list[tuple[str, str]], markdown: str, context: TaskContext
+    ) -> list[dict[str, str]]:
+        listing = "\n".join(f"- {name}：{desc or '按名称理解'}" for name, desc in fields)
+        data = self.llm.chat_json(
+            [
+                {"role": "system", "content": FIELDS_SYSTEM},
+                {"role": "user", "content": f"字段：\n{listing}\n\n正文：\n{markdown[:10000]}"},
+            ]
+        )
+        rows = [row for row in (data.get("rows") or []) if isinstance(row, dict)]
+        normalized = []
+        for row in rows:
+            normalized.append({name: str(row.get(name) or "无数据") for name, _ in fields})
+
+        payload = json.dumps(normalized, ensure_ascii=False, indent=2)
+        spec = context.artifact_store.write_bytes(
+            context.task_id, "fields.json", payload.encode("utf-8"), "application/json; charset=utf-8"
+        )
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=[name for name, _ in fields])
+        writer.writeheader()
+        writer.writerows(normalized)
+        csv_spec = context.artifact_store.write_bytes(
+            context.task_id, "fields.csv", buffer.getvalue().encode("utf-8"), "text/csv; charset=utf-8"
+        )
+        context.state["field_specs"] = [
+            ArtifactSpec("fields.json", spec.content_type, spec.size_bytes),
+            ArtifactSpec("fields.csv", csv_spec.content_type, csv_spec.size_bytes),
+        ]
+        return normalized
+
     def _write_report(self, context: TaskContext) -> StepOutcome:
         """生成轻量元数据报告；正文本身在 article.md，截图在 screenshot.png。"""
         markdown = context.state["article"]
         words = _count_words(markdown)
         reading_minutes = max(1, round(words / 300))
         screenshot_bytes = context.state["screenshot_spec"].size_bytes
+
+        extra_artifacts: list[ArtifactSpec] = []
+        notes: list[str] = []
+        goal_label = ""
+        reading_words = 0
+        field_rows: list[dict[str, str]] = []
+        fields = self._declared_fields(context)
+        llm_ready = bool(self.llm and getattr(self.llm, "available", lambda: False)())
+
+        goal = self._goal_instruction(context)
+        if goal:
+            goal_label = GOAL_LABELS.get(str(context.params.get("goal") or ""), goal)[:40]
+            if not llm_ready:
+                notes.append("未配置模型，已跳过精读")
+            else:
+                try:
+                    result = self.llm.chat(
+                        [
+                            {"role": "system", "content": READING_SYSTEM},
+                            {
+                                "role": "user",
+                                "content": f"阅读目标：{goal}\n\n正文（最多 10000 字）：\n{markdown[:10000]}",
+                            },
+                        ],
+                        max_tokens=1600,
+                    )
+                    reading = self._header(context, words, "目标精读") + result.text.strip() + "\n"
+                    spec = context.artifact_store.write_bytes(
+                        context.task_id, "reading.md", reading.encode("utf-8"), "text/markdown; charset=utf-8"
+                    )
+                    extra_artifacts.append(ArtifactSpec("reading.md", spec.content_type, spec.size_bytes))
+                    reading_words = _count_words(result.text)
+                    notes.append("已生成目标精读")
+                except LLMError as exc:
+                    notes.append(f"精读生成失败：{exc.code}")
+
+        if fields and llm_ready:
+            try:
+                field_rows = self._extract_fields(fields, markdown, context)
+            except LLMError as exc:
+                notes.append(f"字段抽取失败：{exc.code}")
+
         report = {
             "url": context.state["url"],
             "title": context.state["title"],
@@ -348,6 +488,9 @@ class WebDigestTemplate:
                 "images": len(_IMAGE.findall(markdown)),
             },
             "screenshot_bytes": screenshot_bytes,
+            "reading": {"goal": goal_label, "words": reading_words},
+            "fields": {"declared": len(fields), "rows": len(field_rows)},
+            "notes": notes,
             "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
         spec = context.artifact_store.write_text(
@@ -355,9 +498,10 @@ class WebDigestTemplate:
             "web-digest.json",
             json.dumps(report, ensure_ascii=False, indent=2),
         )
+        artifacts = [spec, *extra_artifacts, *context.state.get("field_specs", [])]
         return StepOutcome(
             output=f"网页资料整理完成：{words} 词，约 {reading_minutes} 分钟阅读",
-            artifacts=[spec],
+            artifacts=artifacts,
             result={
                 "kind": "web_digest",
                 "message": "网页资料整理完成",
@@ -370,5 +514,9 @@ class WebDigestTemplate:
                 "full_page": True,
                 "screenshot_bytes": screenshot_bytes,
                 "item_count": context.state.get("item_count", 0),
+                "goal": goal_label,
+                "reading_words": reading_words,
+                "field_count": len(fields),
+                "field_rows": len(field_rows),
             },
         )

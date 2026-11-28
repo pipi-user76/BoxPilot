@@ -18,9 +18,16 @@ class Settings(BaseSettings):
     DATABASE_PATH: Path = Path("data/boxpilot.db")
     CHROMA_PATH: Path = Path("data/chroma")
     KB_UPLOAD_MAX_BYTES: int = 10 * 1024 * 1024
+    KB_AUTO_INGEST: bool = False
+    KB_AUTO_INGEST_NAME: str = "任务归档"
+    KB_REWRITE: bool = False
+    KB_LLM_MODEL: str = "qwen-plus"
+    KB_RERANK: bool = False
     ARTIFACT_ROOT: Path = Path("artifacts")
     MAX_ARTIFACT_BYTES: int = 20 * 1024 * 1024
     MAX_CSV_UPLOAD_BYTES: int = 5 * 1024 * 1024
+    MAX_CSV_FILES: int = 5
+    MAX_CSV_TOTAL_BYTES: int = 20 * 1024 * 1024
     TRUSTED_GIT_HOSTS: str = "github.com,gitee.com,gitlab.com"
     REPO_CLONE_ATTEMPTS: int = 2
     REPO_CLONE_TIMEOUT_SECONDS: int = 60
@@ -35,8 +42,13 @@ class Settings(BaseSettings):
         "https://registry.npmmirror.com/-/binary/python-build-standalone"
     )
     WEB_ACCEPTANCE_TIMEOUT_SECONDS: int = 60
+    # 正文提取：优先用 trafilatura 解析原始 DOM，过短或失败时回退到沙箱 Readability/可见文本。
+    EXTRACT_ENGINE: str = "trafilatura"
+    EXTRACT_MIN_CHARS: int = 200
+    EXTRACT_MAX_HTML: int = 2_000_000
     # 步骤级与任务级兜底超时：即使沙箱请求卡死，调度器也不会无限期停在 RUNNING。
     STEP_TIMEOUT_SECONDS: int = 240
+    AUTO_RETRY_ATTEMPTS: int = 1
     TASK_TIMEOUT_SECONDS: int = 900
     ENABLE_DEMO_TASKS: bool = True
     LOG_LEVEL: str = "INFO"
@@ -61,7 +73,9 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = ""
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_EMBEDDING_MODEL: str = "text-embedding-3-small"
-    LLM_TIMEOUT_SECONDS: int = 60
+    LLM_TIMEOUT_SECONDS: int = 240
+    # 主模型不可用时尝试的备用对话模型（空字符串关闭）。
+    LLM_FALLBACK_MODEL: str = "qwen-plus"
     LLM_MAX_RETRIES: int = 2
     LLM_TEMPERATURE: float | None = None
     LLM_MAX_OUTPUT_TOKENS: int = 2000

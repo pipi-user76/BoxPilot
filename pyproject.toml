@@ -14,5 +14,6 @@ dependencies = [
     "python-multipart>=0.0.22",
     "requests>=2.34.2",
     "sqlalchemy>=2.1.6",
+    "trafilatura>=2.0",
     "uvicorn>=0.54.0",
 ]

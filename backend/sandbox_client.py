@@ -214,6 +214,21 @@ class SandboxAdapter:
         except Exception as exc:
             return self._exception_failure(exc)
 
+    def get_page_html(self, max_chars: int = 2_000_000) -> dict[str, Any]:
+        """返回当前页面的原始 DOM，供本机 trafilatura 做正文提取。"""
+        try:
+            response = self.client.browser_page.evaluate(
+                expression="document.documentElement.outerHTML"
+            )
+            if not response.success:
+                return self._failure("COMMAND_FAILED", response.message or "page html extraction failed")
+            html = response.data if isinstance(response.data, str) else str(response.data or "")
+            truncated = len(html) > max_chars
+            html = html[:max_chars]
+            return {"success": True, "data": {"html": html, "truncated": truncated}, "error": None}
+        except Exception as exc:
+            return self._exception_failure(exc)
+
     def evaluate(self, expression: str) -> dict[str, Any]:
         """在页面上下文执行一段 JS，返回 JSON 解析后的结果。
 

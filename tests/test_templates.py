@@ -39,9 +39,11 @@ class TemplateSandbox:
         install_status: str = "ok",
         declared_dependencies: tuple[str, ...] = ("fastapi>=0.1",),
         items: tuple[dict, ...] = (),
+        page_html: str = "",
     ):
         self.title = title
         self.page_text = page_text
+        self.page_html = page_html
         self.test_exit_code = test_exit_code
         self.navigate_ok = navigate_ok
         self.demo_prepared = False
@@ -181,6 +183,9 @@ class TemplateSandbox:
             "data": {"title": self.title, "markdown": self.page_text, "extraction": "readability"},
             "error": None,
         }
+
+    def get_page_html(self, max_chars: int = 2_000_000) -> dict:
+        return {"success": True, "data": {"html": self.page_html[:max_chars], "truncated": False}, "error": None}
 
     def evaluate(self, expression: str) -> dict:
         if self.items:
@@ -657,6 +662,31 @@ class TemplateTests(unittest.TestCase):
         task = client.get(f"/tasks/{created.json()['id']}").json()
         self.assertEqual(task["status"], "SUCCESS")
         self.assertEqual(task["result"]["summary"]["extraction"], "text")
+
+    def test_web_digest_prefers_trafilatura_html(self) -> None:
+        """原始 HTML 可用时优先 trafilatura，正文不应是导航文字。"""
+        article = "".join(
+            f"<p>第{i}段介绍 HTML 标题层级、语义与可访问性写法，标题应当按结构使用。</p>"
+            for i in range(1, 8)
+        )
+        html = (
+            "<html><body><nav><a href='/'>首页</a><a href='/c'>课程</a></nav>"
+            f"<main><article><h1>HTML 标题教程</h1>{article}</article></main>"
+            "<footer>版权所有</footer></body></html>"
+        )
+        sandbox = TemplateSandbox(page_text="首页 课程 论坛", page_html=html)
+        client = self.create_client(sandbox)
+        created = client.post(
+            "/tasks",
+            json={"task_type": "WEB_DIGEST", "params": {"url": "https://example.com/headings"}},
+        )
+        task = client.get(f"/tasks/{created.json()['id']}").json()
+        self.assertEqual(task["status"], "SUCCESS")
+        self.assertEqual(task["result"]["summary"]["extraction"], "trafilatura")
+        artifact = next(item for item in task["artifacts"] if item["filename"] == "article.md")
+        article_text = client.get(f"/artifacts/{artifact['id']}/download").text
+        self.assertIn("HTML 标题教程", article_text)
+        self.assertNotIn("首页", article_text)
 
     def test_web_digest_marks_image_only_page_as_content_empty(self) -> None:
         """只剩图片链接的脚本页面应判为正文过少，而不是产出一份空报告。"""

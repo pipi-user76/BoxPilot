@@ -1,0 +1,222 @@
+<!-- 文件职责：知识库独立页，与网页资料整理同级。 -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BoxPilot 知识库</title>
+  <style>html,body{background:#f4f6f9}body{margin:0;min-height:100vh;color:#111827}</style>
+  <link rel="stylesheet" href="styles.css?v=20261128-15">
+  <link rel="stylesheet" href="kb.css?v=20261128-16">
+  <script type="speculationrules">
+  {"prefetch":[{"source":"list","urls":["task_list.html","kb.html","schedules.html","users.html"]}]}
+  </script>
+  <script defer src="nav.js?v=20261128-1"></script>
+</head>
+<body class="kb-page">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div>
+          <strong>BOXPILOT</strong>
+          <small>任务执行工作台</small>
+        </div>
+      </div>
+
+      <nav class="side-nav" aria-label="功能导航">
+        <p class="side-title">工作空间</p>
+        <a class="side-link with-icon" href="task_list.html">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          <span>全部任务</span>
+        </a>
+        <a class="side-link with-icon" href="schedules.html">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+          <span>定时任务</span>
+        </a>
+
+        <p class="side-title">功能</p>
+        <a class="side-link with-icon is-active" href="kb.html">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v18H7.5A2.5 2.5 0 0 1 5 18.5v-13Z"/><path d="M9 7h6M9 11h6"/></svg>
+          <span>知识库</span>
+        </a>
+        <a class="side-link with-icon" href="task_list.html?type=WEB_DIGEST">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.2 3.6 8.5S14.4 18.2 12 20.5C9.6 18.2 8.4 15.3 8.4 12S9.6 5.8 12 3.5Z"/></svg>
+          <span>网页资料整理</span>
+        </a>
+        <a class="side-link with-icon" href="task_list.html?type=CSV_ANALYSIS">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M9 9.5v10M15 9.5v10"/></svg>
+          <span>CSV 数据分析</span>
+        </a>
+        <a class="side-link with-icon" href="task_list.html?type=REPO_CHECK">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
+          <span>代码仓库体检</span>
+        </a>
+        <a class="side-link with-icon" href="task_list.html?type=WEB_ACCEPTANCE">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12 2.4 2.4 4.6-5"/></svg>
+          <span>网页应用验收</span>
+        </a>
+
+        <p class="side-title">账号</p>
+        <a id="users-link" class="side-link with-icon" href="users.html" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19a6 6 0 0 1 12 0M16 5.5a3 3 0 0 1 0 5.6M18.5 19a5.5 5.5 0 0 0-3-4.9"/></svg>
+          <span>账号管理</span>
+        </a>
+      </nav>
+
+      <div class="side-foot">
+        <div class="user-card" id="user-card" hidden>
+          <span id="user-avatar" class="avatar">B</span>
+          <div class="user-card-text">
+            <strong id="current-user">账号</strong>
+            <small id="current-role">成员</small>
+          </div>
+          <button id="logout-rail" class="user-logout" type="button" title="退出登录" aria-label="退出登录">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12H4m4-4-4 4 4 4M14 4h5v16h-5"/></svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="crumbs">
+          <span>工作台</span>
+          <span class="crumb-sep">/</span>
+          <strong>知识库</strong>
+        </div>
+        <div class="topbar-actions">
+          <span id="health" class="health-badge" data-state="loading">检查环境</span>
+          <span id="today" class="today"></span>
+        </div>
+      </header>
+
+      <main class="content kb-workspace">
+        <div class="kb-header">
+          <div class="kb-switcher">
+            <span class="kb-switcher-label">知识库</span>
+            <div class="kb-switcher-field">
+              <select id="kb-select" aria-label="选择知识库"></select>
+              <span id="kb-meta" class="kb-switcher-meta">加载中…</span>
+            </div>
+          </div>
+          <div class="kb-header-actions">
+            <button id="kb-new" class="button primary small" type="button">新建</button>
+            <button id="kb-rename" class="button ghost small" type="button">重命名</button>
+            <button id="kb-delete" class="button danger small" type="button" disabled>删除</button>
+            <button id="kb-refresh" class="button ghost small" type="button">刷新</button>
+          </div>
+        </div>
+
+        <div class="kb-layout">
+          <aside class="kb-conv-side">
+            <div class="kb-conv-head">
+              <strong>会话</strong>
+              <button id="kb-new-chat" class="kb-icon-button" type="button" title="新建对话" aria-label="新建对话">＋</button>
+            </div>
+            <div id="kb-conv-list" class="kb-conv-list"></div>
+          </aside>
+
+          <section class="kb-chat">
+            <div class="kb-convo">
+              <span id="kb-scope" class="kb-scope">当前知识库</span>
+              <button id="kb-rag-scope" class="kb-rag-scope" type="button" title="选择参与检索的文档">检索：全部文档</button>
+              <button id="kb-docs-toggle" class="kb-doc-toggle" type="button" aria-expanded="false">
+                文档 <span id="kb-doc-count">0</span>
+              </button>
+              <label class="check-item"><input id="kb-use-history" type="checkbox" checked> 带上历史</label>
+            </div>
+            <div id="kb-messages" class="kb-messages" aria-live="polite"></div>
+            <div class="kb-chat-tools">
+              <span id="kb-hint" class="kb-hint" aria-live="polite"></span>
+              <button id="kb-export" class="button ghost small" type="button">导出对话</button>
+            </div>
+            <form id="kb-ask-form" class="kb-ask">
+              <button id="kb-upload" class="kb-attach" type="button" title="上传 PDF / Markdown" aria-label="上传文档">＋</button>
+              <input id="kb-file" type="file" accept=".pdf,.txt,.md" hidden>
+              <textarea id="kb-question" rows="1" placeholder="跨文档提问，Enter 发送，Shift+Enter 换行" aria-label="向知识库提问"></textarea>
+              <button id="kb-stop" class="button secondary" type="button" hidden>停止</button>
+              <button id="kb-ask" class="button primary" type="submit">发送</button>
+            </form>
+          </section>
+
+          <aside id="kb-docs-drawer" class="kb-drawer" hidden>
+            <div class="kb-docs-head">
+              <strong>文档</strong>
+              <input id="kb-doc-search" class="kb-doc-search" type="search" placeholder="搜索文档">
+              <select id="kb-doc-kind" class="kb-doc-kind" aria-label="按类型筛选">
+                <option value="">全部类型</option>
+                <option value="web_digest">网页整理</option>
+                <option value="web_compare">网页对比</option>
+                <option value="items">条目表</option>
+                <option value="conversation">对话</option>
+                <option value="text">文本</option>
+              </select>
+              <button id="kb-docs-close" class="kb-icon-button" type="button" aria-label="收起文档栏" title="收起文档栏">›</button>
+            </div>
+            <div id="kb-doc-list" class="kb-doc-list"></div>
+            <div class="kb-docs-foot">
+              <span id="kb-doc-selection">已选 0 / 0</span>
+              <button id="kb-doc-reset" class="button ghost small" type="button" disabled>取消</button>
+              <button id="kb-doc-save" class="button primary small" type="button" disabled>保存</button>
+            </div>
+            <div id="kb-doc-empty" class="empty-state" hidden>
+              <strong>还没有文档</strong>
+              <span>在任务详情点“添加到知识库”，或用输入框左侧的 ＋ 上传。</span>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="kb-dialog" class="create-dialog">
+    <form id="kb-form" method="dialog">
+      <div class="preview-header">
+        <div>
+          <p class="eyebrow">新建知识库</p>
+          <h2>知识库信息</h2>
+        </div>
+        <button id="kb-dialog-cancel" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="create-fields">
+        <label class="field">
+          <span class="field-label">名称</span>
+          <input id="kb-name" type="text" maxlength="80" placeholder="例如：Python 后端调研" required>
+        </label>
+        <label class="field">
+          <span class="field-label">备注</span>
+          <input id="kb-note" type="text" maxlength="400" placeholder="可选，说明这个知识库存什么">
+        </label>
+        <p id="kb-error" class="create-error" hidden></p>
+      </div>
+      <div class="create-footer">
+        <button id="kb-cancel" class="button secondary" type="button">取消</button>
+        <button id="kb-submit" class="button primary" type="submit">创建</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="kb-delete-dialog" class="kb-dialog kb-delete-dialog">
+    <form id="kb-delete-form" method="dialog" class="kb-dialog-body">
+      <header class="dialog-head">
+        <div>
+          <p class="eyebrow">删除知识库</p>
+          <h2 id="kb-delete-title">确认删除</h2>
+        </div>
+        <button id="kb-delete-close" class="icon-button" type="button" aria-label="关闭">×</button>
+      </header>
+      <p class="kb-delete-warning">
+        将永久删除该知识库下的 <strong id="kb-delete-docs">0</strong> 篇文档、全部问答历史和向量索引，无法恢复。
+      </p>
+      <div class="dialog-actions">
+        <button id="kb-delete-cancel" class="button secondary" type="button">取消</button>
+        <button id="kb-delete-confirm" class="button danger" type="submit">删除知识库</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="notifications.js?v=20261128-1"></script>
+  <script src="kb_page.js?v=20261128-15"></script>
+</body>
+</html>

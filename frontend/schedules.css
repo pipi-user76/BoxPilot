@@ -274,3 +274,70 @@
 .status-badge.success i { background: #0f9d76; }
 .status-badge.danger { background: #fdeceb; color: #b42318; }
 .status-badge.danger i { background: #d24a3f; }
+
+/* 定时任务页：统一内容宽度与表格卡片。 */
+.main > .content {
+  width: 100%;
+  max-width: 1220px;
+  margin: 0 auto;
+}
+
+.main > .content > .panel {
+  margin-bottom: 24px;
+}
+
+.panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #fff, #fbfcfe);
+}
+
+.panel-toolbar .search-field {
+  width: min(430px, 100%);
+  height: 38px;
+  background: #f8fafc;
+}
+
+.schedule-head,
+.schedule-row {
+  grid-template-columns: minmax(0, 1.7fr) 96px 132px 112px 92px 220px;
+  gap: 10px;
+  padding: 13px 18px;
+}
+
+.schedule-head {
+  background: #f8fafc;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.schedule-row:last-child { border-bottom: 0; }
+
+.row-actions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.link-button { white-space: nowrap; }
+
+@media (max-width: 1180px) {
+  .schedule-head, .schedule-row { grid-template-columns: minmax(0, 1.7fr) 92px 124px 104px 200px; }
+  .row-rule { display: none; }
+}
+
+@media (max-width: 900px) {
+  .panel-toolbar { padding: 14px; }
+  .panel-toolbar .search-field { width: 100%; }
+}
+
+@media (max-width: 620px) {
+  .page-head { flex-direction: column; gap: 12px; }
+  .page-actions { width: 100%; }
+  .page-actions .button { flex: 1; }
+  .row-actions { flex-wrap: wrap; justify-content: flex-start; }
+}

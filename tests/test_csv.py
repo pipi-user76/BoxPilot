@@ -28,9 +28,22 @@ class CsvSandbox:
             "column_names": ["value", "group"],
             "duplicate_rows": 0,
             "missing_cells": 0,
-            "completeness": 100.0,
-            "column_summary": {
-                "value": {
+            "completeness": 1.0,
+            "profile": {
+                "signals": {"has_time": False, "measure_count": 1},
+                "columns": [
+                    {"name": "value", "role": "measure", "reason": "数值列"},
+                    {"name": "group", "role": "enum", "reason": "枚举列"},
+                ],
+            },
+            "table_kind": "numeric_snapshot",
+            "recommended_view": "bar",
+            "view_options": [{"id": "bar", "label": "柱状图", "enabled": True, "score": 80, "reason": "分类+数值"}],
+            "charts": {"profile_bar": {"type": "bar", "items": [{"label": "value", "value": 3}]}},
+            "sample": [{"value": 1, "group": "a"}],
+            "column_summary": [
+                {
+                    "name": "value",
                     "type": "integer",
                     "count": 3,
                     "missing": 0,
@@ -42,7 +55,8 @@ class CsvSandbox:
                     "median": 2,
                     "stdev": 1.0,
                 },
-                "group": {
+                {
+                    "name": "group",
                     "type": "string",
                     "count": 3,
                     "missing": 0,
@@ -50,7 +64,7 @@ class CsvSandbox:
                     "examples": ["a", "b", "a"],
                     "top_values": [{"value": "a", "count": 2}, {"value": "b", "count": 1}],
                 },
-            },
+            ],
         }
 
     def ensure_task_workspace(self, task_id: str) -> dict:
@@ -99,14 +113,33 @@ class CsvApiTests(unittest.TestCase):
         self.assertEqual(summary["rows"], 3)
         self.assertEqual(summary["columns"], 2)
         self.assertEqual(summary["missing_cells"], 0)
-        self.assertEqual(summary["completeness"], 100.0)
+        self.assertEqual(summary["completeness"], 1.0)
         report_artifact = next(item for item in task["artifacts"] if item["filename"] == "report.md")
         report = self.client.get(f"/artifacts/{report_artifact['id']}/download")
         self.assertIn("CSV 分析报告", report.text)
         self.assertEqual(task["result"]["summary"]["kind"], "csv_analysis")
         self.assertEqual(task["result"]["summary"]["rows"], 3)
-        self.assertEqual(task["result"]["summary"]["completeness"], 100.0)
+        self.assertEqual(task["result"]["summary"]["completeness"], 1.0)
         self.assertEqual(task["steps"][0]["name"], "校验 CSV 文件")
+
+    def test_csv_upload_supports_multiple_files(self) -> None:
+        """多 CSV 上传应生成 datasets 与 multi_dataset 摘要。"""
+        response = self.client.post(
+            "/tasks/csv",
+            files=[
+                ("files", ("a.csv", b"value,group\n1,a\n2,b\n3,a\n", "text/csv")),
+                ("files", ("b.csv", b"value,group\n4,a\n5,b\n6,a\n", "text/csv")),
+            ],
+        )
+        self.assertEqual(response.status_code, 202)
+        task = self.client.get(f"/tasks/{response.json()['id']}").json()
+        self.assertEqual(task["status"], "SUCCESS")
+        summary_artifact = next(item for item in task["artifacts"] if item["filename"] == "summary.json")
+        summary = self.client.get(f"/artifacts/{summary_artifact['id']}/download").json()
+        self.assertEqual(summary["dataset_count"], 2)
+        self.assertEqual(summary["table_kind"], "multi_dataset")
+        self.assertEqual([item["name"] for item in summary["datasets"]], ["a.csv", "b.csv"])
+        self.assertEqual(task["result"]["summary"]["dataset_count"], 2)
 
     def test_csv_upload_rejects_non_csv_file(self) -> None:
         """扩展名不是 .csv 时，不应创建任务。"""
@@ -137,15 +170,35 @@ class CsvAnalyzerTests(unittest.TestCase):
         self.assertEqual(summary["rows"], 4)
         self.assertEqual(summary["columns"], 3)
         self.assertEqual(summary["duplicate_rows"], 1)
-        self.assertEqual(summary["column_summary"]["score"]["missing"], 1)
-        self.assertEqual(summary["column_summary"]["score"]["count"], 3)
+        columns = {item["name"]: item for item in summary["column_summary"]}
+        self.assertEqual(columns["score"]["missing"], 1)
+        self.assertEqual(columns["score"]["count"], 3)
+
+    def test_analyzer_recommends_line_for_time_series(self) -> None:
+        with workspace_temp_dir() as temp_dir:
+            source = Path(temp_dir) / "series.csv"
+            source.write_text("version,latency\n3.10,120\n3.11,110\n3.12,95\n", encoding="utf-8")
+            summary = analyze_csv(source)
+        self.assertEqual(summary["table_kind"], "numeric_timeseries")
+        self.assertEqual(summary["recommended_view"], "line")
+        self.assertIn("line", summary["charts"])
+        self.assertTrue(next(item for item in summary["view_options"] if item["id"] == "line")["enabled"])
+
+    def test_analyzer_recommends_mindmap_for_compare_checklist(self) -> None:
+        with workspace_temp_dir() as temp_dir:
+            source = Path(temp_dir) / "compare.csv"
+            source.write_text("item,sourceA,sourceB\n价格,高,低\n速度,快,慢\n", encoding="utf-8")
+            summary = analyze_csv(source)
+        self.assertEqual(summary["table_kind"], "compare_checklist")
+        self.assertEqual(summary["recommended_view"], "mindmap")
+        self.assertIn("mindmap", summary["charts"])
 
     def test_analyzer_rejects_empty_csv(self) -> None:
         """空文件应抛出明确错误，而不是生成空摘要。"""
         with workspace_temp_dir() as temp_dir:
             source = Path(temp_dir) / "empty.csv"
             source.write_text("", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "empty"):
+            with self.assertRaisesRegex(ValueError, "为空|empty"):
                 analyze_csv(source)
 
 

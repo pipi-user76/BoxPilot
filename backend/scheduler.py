@@ -64,6 +64,9 @@ class TaskRunner:
         # 取消请求只对正在运行的任务生效，在步骤边界检查，避免中断正在写的产物。
         self._state_lock = threading.Lock()
         self._cancel_requested: set[str] = set()
+        # 失败后待自动重试的任务，等当前执行释放全局锁再逐个跑。
+        self._auto_queue: list[str] = []
+        self.kb = None
         self.log = get_logger("scheduler")
 
     def register(self, task_type: TaskType, template: TaskTemplate) -> None:
@@ -83,6 +86,46 @@ class TaskRunner:
                 with self._state_lock:
                     self._cancel_requested.discard(task_id)
                 self._notify(task_id)
+        # 自动重试放在锁外排队，避免递归获取同一个非重入锁。
+        while self._auto_queue:
+            next_id = self._auto_queue.pop(0)
+            with self._execution_lock:
+                try:
+                    self._run_locked(next_id)
+                finally:
+                    with self._state_lock:
+                        self._cancel_requested.discard(next_id)
+                    self._notify(next_id)
+
+    AUTO_RETRY_CODES = {
+        "SANDBOX_UNAVAILABLE",
+        "PAGE_OPEN_FAILED",
+        "TASK_TIMEOUT",
+        "STEP_TIMEOUT",
+        "COMMAND_FAILED",
+    }
+
+    def _schedule_auto_retry(self, task_id: str, code: str) -> None:
+        """对基础设施类失败自动补跑一次，人工错误（参数/登录/产物为空）不重试。"""
+        if code not in self.AUTO_RETRY_CODES:
+            return
+        task = self.store.get_task(task_id)
+        if task is None or task.attempt > settings.AUTO_RETRY_ATTEMPTS:
+            return
+        try:
+            retried = self.retry_task(task_id)
+        except TaskConflict:
+            return
+        self._auto_queue.append(retried.id)
+        self.log.info(
+            "task_auto_retry",
+            extra={
+                "task_id": task_id,
+                "retry_task_id": retried.id,
+                "attempt": retried.attempt,
+                "error_code": code,
+            },
+        )
 
     def _notify(self, task_id: str) -> None:
         """任务结束后写一条站内通知；没有归属账号的任务不通知。"""
@@ -139,26 +182,25 @@ class TaskRunner:
                 f"只有失败、超时或已取消的任务可以重试（当前 {task.status.value}）",
             )
 
-        retried = self.store.create_task(
-            task.task_type,
-            task.params,
-            attempt=task.attempt + 1,
-            retry_of=task.id,
-            owner_id=task.owner_id,
-        )
+        retried = self.store.reset_task_for_retry(task.id, task.attempt + 1)
+        # 同一任务条重跑：清掉上一次失败的产物，CSV 任务的输入文件要保留。
+        preserved = None
         if task.task_type == TaskType.CSV_ANALYSIS:
             try:
-                self._copy_csv_input(task.id, retried.id)
-            except (FileNotFoundError, ValueError) as exc:
-                # 输入文件已被清理时不能创建一个注定失败的重试任务。
-                self.store.delete_task(retried.id)
-                raise TaskConflict("INPUT_NOT_FOUND", "原任务的 input.csv 已不存在，无法重试") from exc
+                preserved = self.artifact_store.resolve(task.id, "input.csv").read_bytes()
+            except (FileNotFoundError, ValueError):
+                pass
+        try:
+            self.artifact_store.delete_task_dir(task.id)
+        except Exception:  # 清理失败不阻断重试
+            self.log.warning("retry_cleanup_failed", extra={"task_id": task.id})
+        if preserved is not None:
+            self.artifact_store.write_bytes(task.id, "input.csv", preserved, "text/csv")
 
         self.log.info(
             "task_retried",
             extra={
                 "task_id": retried.id,
-                "retry_of": task.id,
                 "task_type": task.task_type.value,
                 "attempt": retried.attempt,
             },
@@ -226,7 +268,14 @@ class TaskRunner:
                 remaining = int(task_deadline - time.monotonic())
                 if remaining <= 0:
                     message = f"任务总时长超过 {settings.TASK_TIMEOUT_SECONDS} 秒，已自动结束。"
-                    self.store.finish_task(task_id, TaskStatus.TIMEOUT, None, "TASK_TIMEOUT", message)
+                    self.store.finish_task(
+                        task_id,
+                        TaskStatus.TIMEOUT,
+                        {"summary": {"kind": "failure", "reason": message, "code": "TASK_TIMEOUT"}},
+                        "TASK_TIMEOUT",
+                        message,
+                    )
+                    self._schedule_auto_retry(task_id, "TASK_TIMEOUT")
                     self.log.warning(
                         "task_timeout",
                         extra={"task_id": task_id, "step": definition.name, "step_index": index},
@@ -248,7 +297,14 @@ class TaskRunner:
                     if status == "timeout":
                         message = f"步骤执行超过 {limit} 秒仍未返回，已停止等待并结束任务。"
                         self.store.finish_step(step.id, StepStatus.FAILED, None, "STEP_TIMEOUT", message)
-                        self.store.finish_task(task_id, TaskStatus.TIMEOUT, None, "STEP_TIMEOUT", message)
+                        self.store.finish_task(
+                            task_id,
+                            TaskStatus.TIMEOUT,
+                            {"summary": {"kind": "failure", "reason": message, "code": "STEP_TIMEOUT"}},
+                            "STEP_TIMEOUT",
+                            message,
+                        )
+                        self._schedule_auto_retry(task_id, "STEP_TIMEOUT")
                         self.log.warning(
                             "step_timeout",
                             extra={
@@ -309,7 +365,14 @@ class TaskRunner:
                         exc.code,
                         exc.message,
                     )
-                    self.store.finish_task(task_id, TaskStatus.FAILED, None, exc.code, exc.message)
+                    self.store.finish_task(
+                        task_id,
+                        TaskStatus.FAILED,
+                        {"summary": {"kind": "failure", "reason": exc.message, "code": exc.code}},
+                        exc.code,
+                        exc.message,
+                    )
+                    self._schedule_auto_retry(task_id, exc.code)
                     self.log.warning(
                         "step_failed",
                         extra={
@@ -324,7 +387,14 @@ class TaskRunner:
                     return
         except Exception as exc:
             # 未预期异常统一视为内部错误，保留任务记录供后续排查。
-            self.store.finish_task(task_id, TaskStatus.FAILED, None, "INTERNAL_ERROR", str(exc))
+            self.store.finish_task(
+                task_id,
+                TaskStatus.FAILED,
+                {"summary": {"kind": "failure", "reason": str(exc), "code": "INTERNAL_ERROR"}},
+                "INTERNAL_ERROR",
+                str(exc),
+            )
+            self._schedule_auto_retry(task_id, "INTERNAL_ERROR")
             self.log.exception(
                 "task_crashed",
                 extra={"task_id": task_id, "task_type": task.task_type.value},
@@ -343,6 +413,7 @@ class TaskRunner:
             None,
             None,
         )
+        self._auto_ingest(task_id, task)
         self.log.info(
             "task_succeeded",
             extra={
@@ -351,6 +422,24 @@ class TaskRunner:
                 "step_count": len(completed_steps),
             },
         )
+
+    def _auto_ingest(self, task_id: str, task) -> None:
+        """任务成功后把可读产物归档到 owner 的自动知识库；失败不影响任务本身。"""
+        from backend.config import settings
+
+        if not settings.KB_AUTO_INGEST or self.kb is None or not task.owner_id:
+            return
+        try:
+            kb = self.kb.auto_kb(task.owner_id)
+            docs = self.kb.ingest_task_artifacts(
+                kb.id, task.owner_id, task_id, allow_any=True,
+            )
+            self.log.info(
+                "kb_auto_ingested",
+                extra={"task_id": task_id, "kb_id": kb.id, "documents": len(docs)},
+            )
+        except Exception:
+            self.log.exception("kb_auto_ingest_failed", extra={"task_id": task_id})
 
     def _run_step(
         self,
